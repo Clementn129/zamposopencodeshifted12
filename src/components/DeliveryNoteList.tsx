@@ -19,6 +19,15 @@ interface DeliveryNoteListProps {
 const statusColors: Record<string, string> = {
   pending: 'bg-warning/15 text-warning',
   delivered: 'bg-success/15 text-success',
+  completed: 'bg-primary/15 text-primary',
+  invoiced: 'bg-muted text-muted-foreground',
+};
+
+const statusLabels: Record<string, string> = {
+  pending: 'Pending',
+  delivered: 'Delivered',
+  completed: 'Completed',
+  invoiced: 'Invoiced',
 };
 
 const DeliveryNoteList = ({ deliveryNotes, isLoading, onNew, onView, onMarkDelivered, onDelete }: DeliveryNoteListProps) => {
@@ -63,7 +72,7 @@ const DeliveryNoteList = ({ deliveryNotes, isLoading, onNew, onView, onMarkDeliv
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-display font-semibold text-sm">{dn.deliveryNoteNumber}</p>
                       <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${statusColors[dn.status] || ''}`}>
-                        {dn.status === 'delivered' ? 'Delivered' : 'Pending'}
+                        {statusLabels[dn.status] || 'Pending'}
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground truncate">

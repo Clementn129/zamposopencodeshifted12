@@ -17,6 +17,8 @@ interface DeliveryNoteViewProps {
 const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: 'Pending', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
   delivered: { label: 'Delivered', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  completed: { label: 'Completed', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' },
+  invoiced: { label: 'Invoiced', className: 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400' },
 };
 
 const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack, onMarkDelivered, onCreateInvoice }: DeliveryNoteViewProps) => {
@@ -111,7 +113,7 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
     doc.setTextColor(30, 30, 30);
     doc.setFontSize(9);
     doc.text(new Date(deliveryNote.createdAt).toLocaleDateString(), 14, y);
-    doc.text(deliveryNote.status === 'delivered' ? 'Delivered' : 'Pending', 80, y);
+    doc.text(deliveryNote.status === 'delivered' ? 'Delivered' : deliveryNote.status === 'completed' ? 'Completed' : deliveryNote.status === 'invoiced' ? 'Invoiced' : 'Pending', 80, y);
     doc.text(deliveryNote.driverName || 'N/A', 140, y);
     y += 8;
 
@@ -243,7 +245,7 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
               <CheckCircle className="h-4 w-4 mr-1" /> Mark Delivered
             </Button>
           )}
-          {onCreateInvoice && (
+          {onCreateInvoice && deliveryNote.status !== 'completed' && (
             <Button variant="outline" size="sm" onClick={onCreateInvoice}>
               <ReceiptText className="h-4 w-4 mr-1" /> Invoice
             </Button>

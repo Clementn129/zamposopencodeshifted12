@@ -289,7 +289,7 @@ const Debtors = () => {
         name: l.name,
         price: l.price,
         quantity: l.quantity,
-        costPrice: null,
+        costPrice: activeProducts.find(x => x.id === l.productId)?.costPrice ?? null,
         discountType: null,
         discountValue: 0,
         notes: null,

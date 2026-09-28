@@ -478,6 +478,7 @@ const SalesHistory = () => {
 
     // Calculate profit from cost prices, accounting for discounts
     let totalProfit = 0;
+    let totalCost = 0;
     let hasCostData = false;
     countableSales.forEach(sale => {
       const saleDiscount = Number(sale.discountAmount) || 0;
@@ -492,6 +493,7 @@ const SalesHistory = () => {
         const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
         const itemRevenue = itemTotal - itemDiscountShare;
 
+        totalCost += costPrice * qty;
         if (costPrice > 0) {
           hasCostData = true;
           const itemCost = costPrice * qty;
@@ -526,6 +528,7 @@ const SalesHistory = () => {
       netProfit,
       netCashPosition,
       totalProfit,
+      totalCost,
       hasCostData,
       transactionCount: countableSales.length,
       refundCount: refundedSales.length,
@@ -551,6 +554,7 @@ const SalesHistory = () => {
 
     // Calculate profit from cost prices, accounting for discounts
     let totalProfit = 0;
+    let totalCost = 0;
     let hasCostData = false;
     countableSales.forEach(sale => {
       const saleDiscount = Number(sale.discountAmount) || 0;
@@ -566,6 +570,7 @@ const SalesHistory = () => {
         const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
         const itemRevenue = itemTotal - itemDiscountShare;
 
+        totalCost += costPrice * qty;
         if (costPrice > 0) {
           hasCostData = true;
           const itemCost = costPrice * qty;
@@ -589,7 +594,7 @@ const SalesHistory = () => {
       totalExpenses: businessExpenses,
       ownerDrawings,
       totalOutflows,
-      netProfit, totalProfit, hasCostData,
+      netProfit, totalProfit, totalCost, hasCostData,
       taxCollected, taxableSales, zeroRatedSales, exemptSales,
     };
   }, [filteredSales, filteredExpenses]);
@@ -852,14 +857,23 @@ const SalesHistory = () => {
       <div className="text-xs text-muted-foreground space-y-1">
         {sale.items.map((item, idx) => {
           const profit = calculateItemProfit(sale, item);
+          const costPrice = Number(item.costPrice) || 0;
+          const itemCost = costPrice * (Number(item.quantity) || 0);
           return (
-            <div key={idx} className="flex justify-between">
+            <div key={idx} className="flex justify-between gap-3">
               <span>{item.quantity}× {item.name}</span>
-              {profit !== null && (
-                <span className={`${profit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                  Profit: ZMW {profit.toFixed(2)}
-                </span>
-              )}
+              <span className="flex gap-3 shrink-0">
+                {costPrice > 0 && (
+                  <span className="text-muted-foreground">
+                    Cost: ZMW {itemCost.toFixed(2)}
+                  </span>
+                )}
+                {profit !== null && (
+                  <span className={`${profit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                    Profit: ZMW {profit.toFixed(2)}
+                  </span>
+                )}
+              </span>
             </div>
           );
         })}
@@ -1015,7 +1029,7 @@ const SalesHistory = () => {
               </div>
 
               {/* Stats Cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <Card>
                   <CardContent className="p-4 text-center">
                     <p className="text-xs text-muted-foreground">Total Sales</p>
@@ -1026,6 +1040,15 @@ const SalesHistory = () => {
                   <CardContent className="p-4 text-center">
                     <p className="text-xs text-muted-foreground">Expenses</p>
                     <p className="text-xl font-display font-bold text-destructive">ZMW {stats.totalExpenses.toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Cost of Goods</p>
+                    <p className="text-xl font-display font-bold">ZMW {stats.totalCost.toFixed(2)}</p>
+                    {stats.hasCostData && (
+                      <p className="text-xs text-muted-foreground mt-1">(Cost × Quantity)</p>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
@@ -1222,6 +1245,18 @@ const SalesHistory = () => {
                     </div>
                     <p className="text-xl font-display font-bold text-destructive">ZMW {monthlyStats.totalExpenses.toFixed(2)}</p>
                     <p className="text-xs text-muted-foreground">{monthlyFilteredExpenses.length} entries</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <TrendingUp className="h-4 w-4 text-amber-600" />
+                      <p className="text-xs text-muted-foreground">Cost of Goods</p>
+                    </div>
+                    <p className="text-xl font-display font-bold">ZMW {monthlyStats.totalCost.toFixed(2)}</p>
+                    {monthlyStats.hasCostData && (
+                      <p className="text-xs text-muted-foreground">(Cost × Quantity)</p>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>

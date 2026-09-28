@@ -23,7 +23,7 @@ export interface DeliveryNote {
   driverName: string | null;
   carPlate: string | null;
   notes: string | null;
-  status: 'pending' | 'delivered';
+  status: 'pending' | 'delivered' | 'invoiced' | 'completed';
   quotationId: string | null;
   createdAt: string;
   updatedAt: string;

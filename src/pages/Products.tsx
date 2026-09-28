@@ -274,8 +274,8 @@ const Products = () => {
     const stockNum = parseInt0(stock, 0);
     const minStockNum = parseInt0(minimumStock, 5);
 
-    if (priceNum <= 0) {
-      toast({ variant: "destructive", title: "Invalid price", description: "Enter a price greater than 0." });
+    if (priceNum < 0) {
+      toast({ variant: "destructive", title: "Invalid price", description: "Enter a price of 0 or more." });
       return;
     }
 

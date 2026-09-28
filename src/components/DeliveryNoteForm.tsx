@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ArrowLeft, Plus, Trash2, Save } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Save, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,8 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
   const [driverName, setDriverName] = useState(existingNote?.driverName || "");
   const [carPlate, setCarPlate] = useState(existingNote?.carPlate || "");
   const [notes, setNotes] = useState(existingNote?.notes || "");
-  const [status, setStatus] = useState<'pending' | 'delivered'>(existingNote?.status || 'pending');
+  const [status, setStatus] = useState<DeliveryNote['status']>(existingNote?.status || 'pending');
+  const [markComplete, setMarkComplete] = useState(existingNote?.status === 'completed');
   const [items, setItems] = useState<DeliveryNoteItem[]>(existingNote?.items || (quotationItems ?? []));
   const [searchQuery, setSearchQuery] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -86,10 +87,15 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
         driverName: driverName || null,
         carPlate: carPlate || null,
         notes: notes || null,
-        status,
+        status: markComplete ? 'completed' : status,
         quotationId: quotationId || null,
       }, items);
-      toast({ title: 'Delivery note saved' });
+      toast({
+        title: 'Delivery note saved',
+        description: markComplete
+          ? 'Marked complete — stock updated and the sale was recorded.'
+          : undefined,
+      });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message });
     } finally {
@@ -198,6 +204,35 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
                   <span className="text-lg">ZMW {total.toFixed(2)}</span>
                 </div>
               </div>
+
+              {!existingNote && (
+                <button
+                  type="button"
+                  onClick={() => setMarkComplete(v => !v)}
+                  aria-pressed={markComplete}
+                  className={`w-full flex items-start gap-3 rounded-lg border p-3 text-left transition ${
+                    markComplete
+                      ? 'border-success bg-success/10'
+                      : 'border-border bg-secondary/50 hover:border-success/60'
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
+                      markComplete
+                        ? 'border-success bg-success text-success-foreground'
+                        : 'border-muted-foreground/40 bg-background'
+                    }`}
+                  >
+                    {markComplete && <CheckCircle2 className="h-3.5 w-3.5" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">Complete</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Move stock now and record this as a cash sale in Sales History.
+                    </span>
+                  </span>
+                </button>
+              )}
 
               <Button variant="pos" className="w-full" onClick={handleSave} disabled={isSaving}>
                 <Save className="h-4 w-4 mr-2" />

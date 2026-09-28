@@ -2080,7 +2080,7 @@ export type Database = {
       affiliate_status: "pending" | "active" | "suspended"
       app_role: "business_owner" | "super_admin" | "cashier"
       commission_status: "pending" | "paid"
-      delivery_note_status: "pending" | "delivered" | "invoiced"
+      delivery_note_status: "pending" | "delivered" | "invoiced" | "completed"
       invoice_status: "draft" | "sent" | "paid" | "void"
       payment_status: "pending" | "approved" | "rejected"
       quotation_status:
@@ -2226,7 +2226,7 @@ export const Constants = {
       affiliate_status: ["pending", "active", "suspended"],
       app_role: ["business_owner", "super_admin", "cashier"],
       commission_status: ["pending", "paid"],
-      delivery_note_status: ["pending", "delivered", "invoiced"],
+      delivery_note_status: ["pending", "delivered", "invoiced", "completed"],
       invoice_status: ["draft", "sent", "paid", "void"],
       payment_status: ["pending", "approved", "rejected"],
       quotation_status: [
