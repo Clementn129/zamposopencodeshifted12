@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { clearOfflineSession } from '@/lib/offlineStorage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -51,6 +52,7 @@ const AdminLogin = () => {
           .select('role')
           .eq('user_id', authData.user.id);
         const roleList = allRoles?.map((r: any) => r.role).join(', ') || 'none';
+        clearOfflineSession();
         await supabase.auth.signOut();
         toast({
           variant: 'destructive',

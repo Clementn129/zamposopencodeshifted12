@@ -819,6 +819,64 @@ export interface OfflineUser {
   lastOnlineLogin: string;
 }
 
+/**
+ * Snapshot of an offline (cached-credentials / cashier PIN) login.
+ *
+ * Supabase never sees these logins, so there is no server-side session to
+ * restore from — without persisting this record the login only survives as
+ * long as the page is never reloaded (service-worker update, tab refresh,
+ * Android WebView process kill), which logged cashiers out at random.
+ */
+export interface OfflineSessionRecord {
+  userId: string;
+  email: string;
+  role: string;
+  createdAt: string;
+  expiresAt: number;
+}
+
+const OFFLINE_SESSION_KEY = 'zampos_offline_session';
+export const OFFLINE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const persistOfflineSession = (record: Omit<OfflineSessionRecord, 'expiresAt'>): void => {
+  try {
+    localStorage.setItem(
+      OFFLINE_SESSION_KEY,
+      JSON.stringify({ ...record, expiresAt: Date.now() + OFFLINE_SESSION_TTL_MS }),
+    );
+    // Point the per-user session cache (see buildMultiAccountStorage in
+    // integrations/supabase/client.ts) at this user, so a real session left
+    // behind by a different account can't take over after a reload.
+    localStorage.setItem('zampos_active_user', record.userId);
+  } catch {
+    // Storage unavailable/full — the login still works for this page view.
+  }
+};
+
+export const readOfflineSessionRecord = (): OfflineSessionRecord | null => {
+  try {
+    const raw = localStorage.getItem(OFFLINE_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as OfflineSessionRecord;
+    if (!parsed?.userId || typeof parsed.expiresAt !== 'number') return null;
+    if (parsed.expiresAt <= Date.now()) {
+      localStorage.removeItem(OFFLINE_SESSION_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+export const clearOfflineSession = (): void => {
+  try {
+    localStorage.removeItem(OFFLINE_SESSION_KEY);
+  } catch {
+    // noop
+  }
+};
+
 export const hashPassword = async (password: string): Promise<string> => {
   const encoder = new TextEncoder();
   const data = encoder.encode(password);

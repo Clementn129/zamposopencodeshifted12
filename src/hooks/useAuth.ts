@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  persistOfflineSession,
+  readOfflineSessionRecord,
+  clearOfflineSession,
+  type OfflineSessionRecord,
+} from '@/lib/offlineStorage';
 
 const isElectron = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
 const LOADING_TIMEOUT_MS = isElectron ? 3_000 : 15_000;
@@ -10,6 +16,28 @@ const ROLE_CACHE_PREFIX = 'zampos:role:';
  *  and redirecting to login. Prevents the app from hanging forever if
  *  getSession / refreshSession stall on slow or flaky networks. */
 const RECOVERY_TIMEOUT_MS = 10_000;
+
+/** Rebuilds the in-memory session used by offline logins (there is no real
+ *  Supabase session to restore, so the record in localStorage is the source
+ *  of truth until it expires or the user signs out). */
+const buildOfflineSession = (record: OfflineSessionRecord): Session => {
+  const mockUser = {
+    id: record.userId,
+    email: record.email,
+    user_metadata: { offline: true },
+    app_metadata: {},
+    aud: 'authenticated',
+    created_at: record.createdAt,
+  } as User;
+  return {
+    access_token: 'offline-session-' + record.userId,
+    refresh_token: 'offline-refresh-' + record.userId,
+    expires_in: Math.max(60, Math.round((record.expiresAt - Date.now()) / 1000)),
+    expires_at: Math.floor(record.expiresAt / 1000),
+    token_type: 'bearer',
+    user: mockUser,
+  } as Session;
+};
 
 export type UserRole = 'owner' | 'cashier' | 'kitchen_staff' | 'manager' | 'super_admin' | 'unknown';
 
@@ -23,13 +51,29 @@ interface AuthState {
 }
 
 export const useAuth = () => {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    session: null,
-    isLoading: true,
-    isSuperAdmin: false,
-    role: 'unknown',
-    isPasswordRecovery: false,
+  // Offline logins have no Supabase session to boot from, so restore one
+  // synchronously — otherwise a reload always starts at the login screen.
+  const [authState, setAuthState] = useState<AuthState>(() => {
+    const restored = readOfflineSessionRecord();
+    if (restored) {
+      const session = buildOfflineSession(restored);
+      return {
+        user: session.user,
+        session,
+        isLoading: false,
+        isSuperAdmin: restored.role === 'super_admin',
+        role: (restored.role as UserRole) || 'unknown',
+        isPasswordRecovery: false,
+      };
+    }
+    return {
+      user: null,
+      session: null,
+      isLoading: true,
+      isSuperAdmin: false,
+      role: 'unknown',
+      isPasswordRecovery: false,
+    };
   });
 
   const initialCheckDone = useRef(false);
@@ -96,6 +140,21 @@ export const useAuth = () => {
     }
   }, []);
 
+  /** Installs a persisted offline login as the active session. */
+  const applyOfflineSession = useCallback((record: OfflineSessionRecord) => {
+    clearRecoveryTimer();
+    isRecoveringRef.current = false;
+    const session = buildOfflineSession(record);
+    setAuthState({
+      user: session.user,
+      session,
+      isLoading: false,
+      isSuperAdmin: record.role === 'super_admin',
+      role: (record.role as UserRole) || 'unknown',
+      isPasswordRecovery: false,
+    });
+  }, [clearRecoveryTimer]);
+
   useEffect(() => {
     loadingTimerRef.current = setTimeout(() => {
       if (authState.isLoading) {
@@ -124,6 +183,8 @@ export const useAuth = () => {
             setAuthState(prev => ({ ...prev, session, user: session.user, isLoading: false, isPasswordRecovery: true }));
             return;
           }
+          // A real session supersedes any persisted offline login.
+          clearOfflineSession();
           applySession(session);
           setTimeout(async () => {
             const { role, isSuperAdmin } = await resolveRole(session.user.id);
@@ -133,6 +194,14 @@ export const useAuth = () => {
         }
 
         // ---- session is null ----
+        // Offline logins never create a Supabase session, so there is nothing
+        // for refreshSession() to recover — restore the persisted record
+        // instead of dumping the user back on the login screen.
+        const offlineRecord = readOfflineSessionRecord();
+        if (offlineRecord) {
+          applyOfflineSession(offlineRecord);
+          return;
+        }
         if (isRecoveringRef.current) return;
         isRecoveringRef.current = true;
 
@@ -202,6 +271,14 @@ export const useAuth = () => {
         if (authEventHandled.current) return;
         if (error) console.warn('getSession returned an error:', error);
 
+        if (!session?.user) {
+          const offlineRecord = readOfflineSessionRecord();
+          if (offlineRecord) {
+            applyOfflineSession(offlineRecord);
+            return;
+          }
+        }
+
         applySession(session);
 
         if (session?.user) {
@@ -227,7 +304,7 @@ export const useAuth = () => {
       clearRecoveryTimer();
       subscription.unsubscribe();
     };
-  }, [applySession, resolveRole, clearRecoveryTimer]);
+  }, [applySession, resolveRole, clearRecoveryTimer, applyOfflineSession]);
 
   const signUp = async (email: string, password: string, fullName: string, businessName: string, phone?: string, address?: string, affiliateCode?: string, businessType?: string) => {
     const { getAppUrl } = await import('@/lib/appUrl');
@@ -254,6 +331,7 @@ export const useAuth = () => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (!error) {
+        clearOfflineSession();
         applySession(data.session);
         if (data.session?.user) {
           setTimeout(async () => {
@@ -346,6 +424,12 @@ export const useAuth = () => {
         user: mockUser,
       } as Session;
       applySession(mockSession);
+      persistOfflineSession({
+        userId: cached.userId,
+        email: cached.email,
+        role: cached.role,
+        createdAt: cached.lastOnlineLogin,
+      });
       setAuthState(prev => ({
         ...prev,
         isSuperAdmin: cached.role === 'super_admin',
@@ -386,6 +470,12 @@ export const useAuth = () => {
         user: mockUser,
       } as Session;
       applySession(mockSession);
+      persistOfflineSession({
+        userId: cached.userId,
+        email: cached.email,
+        role: 'cashier',
+        createdAt: cached.lastOnlineLogin,
+      });
       setAuthState(prev => ({
         ...prev,
         isSuperAdmin: false,
@@ -400,6 +490,9 @@ export const useAuth = () => {
   /** Safe signOut — never throws, so callers can always navigate after. */
   const signOut = async () => {
     try {
+      // Clear first: the SIGNED_OUT event below must not resurrect the
+      // persisted offline login for this device.
+      clearOfflineSession();
       setAuthState(prev => ({ ...prev, isPasswordRecovery: false }));
       const { error } = await supabase.auth.signOut();
       return { error };

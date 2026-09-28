@@ -14,6 +14,7 @@ import ConnectionStatus from "@/components/ConnectionStatus";
 import AdminAffiliatePanel from "@/components/AdminAffiliatePanel";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { clearOfflineSession } from "@/lib/offlineStorage";
 import { PAYMENT_DETAILS, PRICING_TIERS } from "@/lib/paymentDetails";
 import { exportBusinessesToCsv } from "@/lib/csvExport";
 import { useToast } from "@/hooks/use-toast";
@@ -422,6 +423,7 @@ const AdminDashboard = () => {
   };
 
   const handleLogout = async () => {
+    clearOfflineSession();
     await supabase.auth.signOut();
     navigate("/admin-login");
   };
