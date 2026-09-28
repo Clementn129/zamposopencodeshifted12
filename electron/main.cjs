@@ -9,6 +9,7 @@ let mainWindow = null;
 let printer = null;
 let connectionType = "usb";
 let paperWidthMm = 80;
+let drawerPin = 2;
 
 function getPrinter() {
   if (!printer) {
@@ -73,6 +74,28 @@ function setupPrinterIPC() {
 
   ipcMain.on("printer-list-usb", (event) => {
     event.returnValue = JSON.stringify([]);
+  });
+
+  ipcMain.on("printer-drawer-open", (event) => {
+    const p = getPrinter();
+    if (!p) { event.returnValue = "ERROR: Printer module not available"; return; }
+    if (!p.isConnected()) {
+      const result = p.findAndConnect();
+      if (!result.ok) { event.returnValue = "ERROR: " + result.error; return; }
+      connectionType = "usb";
+    }
+    p.openCashDrawer(drawerPin)
+      .then((r) => { event.returnValue = r.ok ? "OK" : "ERROR: " + r.error; })
+      .catch((e) => { event.returnValue = "ERROR: " + e.message; });
+  });
+
+  ipcMain.on("printer-set-drawer-pin", (event, pin) => {
+    drawerPin = Number(pin) === 5 ? 5 : 2;
+    event.returnValue = "OK";
+  });
+
+  ipcMain.on("printer-get-drawer-pin", (event) => {
+    event.returnValue = drawerPin;
   });
 
   ipcMain.on("printer-set-paper-width", (event, width) => {

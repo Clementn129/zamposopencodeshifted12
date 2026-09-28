@@ -52,6 +52,15 @@ contextBridge.exposeInMainWorld("Android", {
   getPaperWidth: () => {
     return ipcRenderer.sendSync("printer-get-paper-width");
   },
+  openCashDrawer: () => {
+    return ipcRenderer.sendSync("printer-drawer-open");
+  },
+  setDrawerPin: (pin) => {
+    ipcRenderer.sendSync("printer-set-drawer-pin", pin);
+  },
+  getDrawerPin: () => {
+    return ipcRenderer.sendSync("printer-get-drawer-pin");
+  },
   getConnectionType: () => {
     return ipcRenderer.sendSync("printer-get-connection-type");
   },

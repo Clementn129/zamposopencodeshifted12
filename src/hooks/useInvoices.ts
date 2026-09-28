@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { generateOfflineId, queuePendingOp, cacheInvoices, getCachedInvoices } from '@/lib/offlineStorage';
+import { openCashDrawerIfEnabled } from '@/lib/cashDrawer';
 
 export interface InvoiceItem {
   id?: string;
@@ -412,6 +413,7 @@ export function useInvoices(businessId: string | undefined) {
       });
       setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: 'paid', paymentMethod } : i));
       toast({ title: 'Invoice payment saved offline', description: 'Sale will be created when connected.' });
+      if (paymentMethod === 'cash') openCashDrawerIfEnabled();
       return null;
     }
 
@@ -420,6 +422,7 @@ export function useInvoices(businessId: string | undefined) {
       p_payment_method: paymentMethod,
     });
     if (error) throw error;
+    if (paymentMethod === 'cash') openCashDrawerIfEnabled();
     await fetchInvoices();
     return saleId as string;
   };

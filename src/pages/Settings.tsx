@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,6 +17,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { generateOfflineId, queuePendingOp } from '@/lib/offlineStorage';
+import { getDrawerPin, setDrawerPin, isDrawerAutoOpen, setDrawerAutoOpen, isDesktopApp, openCashDrawer } from '@/lib/cashDrawer';
 import CashiersManager from '@/components/CashiersManager';
 import DiningTablesManager from '@/components/DiningTablesManager';
 
@@ -52,6 +54,31 @@ const Settings = () => {
     const saved = window.localStorage.getItem(RECEIPT_SIZE_KEY);
     return saved === '58mm' || saved === '80mm' || saved === 'a4' ? saved : '80mm';
   });
+
+  // Cash drawer (desktop app only)
+  const [drawerPin, setDrawerPinState] = useState<number>(() => getDrawerPin());
+  const [drawerAutoOpen, setDrawerAutoOpenState] = useState<boolean>(() => isDrawerAutoOpen());
+
+  const handleDrawerPinChange = (value: string) => {
+    const pin = value === '5' ? 5 : 2;
+    setDrawerPinState(pin);
+    setDrawerPin(pin);
+  };
+
+  const handleDrawerAutoOpenChange = (enabled: boolean) => {
+    setDrawerAutoOpenState(enabled);
+    setDrawerAutoOpen(enabled);
+  };
+
+  const handleTestDrawer = () => {
+    setDrawerPin(drawerPinState);
+    const result = openCashDrawer();
+    if (result === 'OK') {
+      toast({ title: 'Cash drawer opened', description: 'If it did not move, check the drawer cable and pin number.' });
+    } else {
+      toast({ variant: 'destructive', title: 'Could not open cash drawer', description: result });
+    }
+  };
 
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
@@ -476,6 +503,50 @@ const Settings = () => {
               </Select>
             </CardContent>
           </Card>
+
+          {/* Cash Drawer — desktop app only: the browser cannot drive the printer. */}
+          {isDesktopApp() && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Archive className="h-5 w-5" /> Cash Drawer</CardTitle>
+                <CardDescription>
+                  Opens the drawer when a cash sale is completed. The drawer plugs into the
+                  printer's RJ11 port, not the computer.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                  <div>
+                    <Label htmlFor="drawer-auto-open">Open on cash sales</Label>
+                    <p className="text-xs text-muted-foreground">Kicks the drawer after a cash payment.</p>
+                  </div>
+                  <Switch
+                    id="drawer-auto-open"
+                    checked={drawerAutoOpen}
+                    onCheckedChange={handleDrawerAutoOpenChange}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Drawer kick pin</Label>
+                  <Select value={String(drawerPin)} onValueChange={handleDrawerPinChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="2">Pin 2 (most common)</SelectItem>
+                      <SelectItem value="5">Pin 5</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Try pin 2 first. If the drawer does not open, switch to pin 5.</p>
+                </div>
+
+                <Button variant="outline" onClick={handleTestDrawer}>
+                  Test cash drawer
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Tax Configuration */}
           <Card>

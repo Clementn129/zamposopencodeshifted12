@@ -35,6 +35,32 @@ function connectTcp(host, port) {
   }
 }
 
+/**
+ * Kick the cash drawer via ESC/POS `ESC p`.
+ * The drawer must be wired to the printer's RJ11 port — never to the PC.
+ * escpos only defines CD_KICK_2 and CD_KICK_5, so any other pin falls back to 2.
+ */
+function openCashDrawer(pin) {
+  return new Promise((resolve) => {
+    if (!escpos) return resolve({ ok: false, error: "ESC/POS library not installed" });
+
+    if (!currentPrinter || !connected) {
+      const conn = findAndConnect();
+      if (!conn.ok) return resolve({ ok: false, error: conn.error });
+    }
+
+    try {
+      currentPrinter.cashdraw(pin === 5 ? 5 : 2);
+      currentPrinter.flush((err) => {
+        if (err) resolve({ ok: false, error: err.message || String(err) });
+        else resolve({ ok: true });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: e.message || String(e) });
+    }
+  });
+}
+
 function disconnect() {
   try {
     if (currentPrinter && typeof currentPrinter.close === "function") {
@@ -98,4 +124,5 @@ module.exports = {
   disconnect,
   isConnected,
   parseAndPrint,
+  openCashDrawer,
 };

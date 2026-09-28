@@ -32,6 +32,7 @@ import { useMenuModifiers } from "@/hooks/useMenuModifiers";
 import { useDiningTables, DiningTable } from "@/hooks/useDiningTables";
 import { saveOfflineSale, markSaleAsSynced, updateCachedProductStock, generateOfflineId, clearCart, getCart, saveCartItem, removeCartItem, queuePendingOp, getCachedDebtors, cacheDebtors, getCachedImageBlob, computeLineId } from "@/lib/offlineStorage";
 import { calculateTax, TaxCategory } from "@/lib/tax";
+import { openCashDrawerIfEnabled } from "@/lib/cashDrawer";
 import { supabase } from "@/integrations/supabase/client";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 
@@ -567,6 +568,12 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         customerName: salePayload.customerName,
         customerTpin: salePayload.customerTpin,
       } as any);
+
+      // Cash handed over -> kick the drawer (desktop app only; no-op elsewhere).
+      if (paymentMethod === "cash" && amountPaidNow > 0) {
+        openCashDrawerIfEnabled();
+      }
+
       await clear();
       await refetchProducts();
     } catch (e: any) {
