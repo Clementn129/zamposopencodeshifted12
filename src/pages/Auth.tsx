@@ -37,6 +37,8 @@ const Auth = () => {
   // Login form
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
   
   // Register form
   const [registerEmail, setRegisterEmail] = useState('');
@@ -93,6 +95,13 @@ const Auth = () => {
               description: 'Signed in with cached credentials.',
             });
           }
+        } else if (msg.includes('email not confirmed')) {
+          setUnconfirmedEmail(loginEmail.trim());
+          toast({
+            variant: 'destructive',
+            title: 'Email not verified',
+            description: 'Check your inbox for the verification link, or resend it below.',
+          });
         } else {
           toast({
             variant: 'destructive',
@@ -101,6 +110,7 @@ const Auth = () => {
           });
         }
       } else {
+        setUnconfirmedEmail(null);
         toast({
           title: 'Welcome back!',
           description: 'You have successfully logged in.',
@@ -114,6 +124,33 @@ const Auth = () => {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const email = (unconfirmedEmail || loginEmail).trim();
+    if (!email) return;
+    setIsResending(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: `${getAppUrl()}/` },
+      });
+      if (error) throw new Error(error.message);
+      setUnconfirmedEmail(email);
+      toast({
+        title: 'Verification email sent',
+        description: `We sent a new link to ${email}. Check your inbox and spam folder.`,
+      });
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not resend email',
+        description: err instanceof Error ? err.message : 'Please try again in a few minutes.',
+      });
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -572,6 +609,27 @@ const Auth = () => {
                 <CardDescription className="mb-6">
                   Sign in to access your business dashboard
                 </CardDescription>
+
+                {unconfirmedEmail && (
+                  <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                    <p className="font-medium text-amber-600 dark:text-amber-400">
+                      {unconfirmedEmail} is not verified yet
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      Open the verification email and click the link. Didn&apos;t get it? Check spam, or resend it.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      disabled={isResending}
+                      onClick={handleResendConfirmation}
+                    >
+                      {isResending ? 'Sending…' : 'Resend verification email'}
+                    </Button>
+                  </div>
+                )}
                 
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">

@@ -13,6 +13,7 @@ import RequireMember from "@/components/RequireMember";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAUpdatePrompt } from "@/components/PWAUpdatePrompt";
 import { AppSyncManager } from "@/components/AppSyncManager";
+import { AuthLinkHandler } from "@/components/AuthLinkHandler";
 import { seoRoutes, SEO_PATHS } from "./pages/seo/routes";
 import { SITE_URL, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from "@/lib/seoDefaults";
 
@@ -84,6 +85,7 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
               <AppSyncManager />
               <BrowserRouter>
                 <SeoReset />
+                <AuthLinkHandler />
                 <Suspense fallback={<PageFallback />}>
                   <Routes>
                     <Route path="/" element={<Index />} />
