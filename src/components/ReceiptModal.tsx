@@ -52,9 +52,10 @@ const escapeHtml = (str: string | null | undefined): string => {
 
 // Size-specific print CSS. Thermal sizes use 58mm/80mm @page with no margins
 // so receipts fit edge-to-edge on the roll. A4 uses standard portrait paper.
-const sizeStyles: Record<ReceiptSize, { pageCss: string; previewWidth: number; bodyWidth: string; baseFont: string; headerFont: string; totalFont: string; padding: string; priceWidth: string; qtyWidth: string }> = {
+const sizeStyles: Record<ReceiptSize, { pageRule: string; printRule: string; previewWidth: number; bodyWidth: string; baseFont: string; headerFont: string; totalFont: string; padding: string; priceWidth: string; qtyWidth: string }> = {
   "58mm": {
-    pageCss: "@page { margin: 0; size: 58mm auto; } html, body { width: 58mm; } body { padding: 2mm 2.5mm; }",
+    pageRule: "@page { margin: 0; }",
+    printRule: "html, body { width: 58mm; } body { padding: 2mm 2.5mm; }",
     previewWidth: 219,
     bodyWidth: "58mm",
     baseFont: "11px",
@@ -65,7 +66,8 @@ const sizeStyles: Record<ReceiptSize, { pageCss: string; previewWidth: number; b
     qtyWidth: "9mm",
   },
   "80mm": {
-    pageCss: "@page { margin: 0; size: 80mm auto; } html, body { width: 80mm; } body { padding: 3mm 4mm; }",
+    pageRule: "@page { margin: 0; }",
+    printRule: "html, body { width: 80mm; } body { padding: 3mm 4mm; }",
     previewWidth: 302,
     bodyWidth: "80mm",
     baseFont: "12px",
@@ -76,7 +78,8 @@ const sizeStyles: Record<ReceiptSize, { pageCss: string; previewWidth: number; b
     qtyWidth: "10mm",
   },
   a4: {
-    pageCss: "@page { margin: 14mm; size: A4 portrait; } html, body { width: auto; } body { padding: 0; max-width: 182mm; margin: 0 auto; }",
+    pageRule: "@page { margin: 14mm; size: A4 portrait; }",
+    printRule: "html, body { width: auto; } body { padding: 0; max-width: 182mm; margin: 0 auto; }",
     previewWidth: 640,
     bodyWidth: "auto",
     baseFont: "13px",
@@ -112,6 +115,7 @@ const ReceiptModal = ({
     const saved = window.localStorage.getItem(RECEIPT_SIZE_KEY) as ReceiptSize | null;
     return saved === "58mm" || saved === "80mm" || saved === "a4" ? saved : "80mm";
   });
+  const [printError, setPrintError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -179,6 +183,7 @@ const ReceiptModal = ({
         <head>
           <title>Receipt - ${safeReceiptId}</title>
           <style>
+            ${styles.pageRule}
             * { box-sizing: border-box; }
             body { font-family: ${fontFamily}; margin: 0; background: white; color: black; font-size: ${styles.baseFont}; padding: ${styles.padding}; width: ${styles.bodyWidth}; overflow-wrap: anywhere; }
             .header { text-align: center; margin-bottom: 12px; }
@@ -198,7 +203,7 @@ const ReceiptModal = ({
             @media print {
               html, body { margin: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
               body { max-width: none; }
-              ${styles.pageCss}
+              ${styles.printRule}
             }
           </style>
         </head>
@@ -289,16 +294,18 @@ const ReceiptModal = ({
   };
 
   const handlePrint = () => {
+    setPrintError(null);
+
     if (isAndroidApp) {
       const escPosText = getEscPosText();
       const paperWidth = size === "58mm" ? 58 : size === "80mm" ? 80 : 80;
       try {
         const result = (window as any).Android.print(escPosText, paperWidth);
-        if (result && result.startsWith("ERROR")) {
-          alert("Print failed: " + result);
+        if (result && String(result).startsWith("ERROR")) {
+          setPrintError(String(result));
         }
       } catch (err) {
-        alert("Print failed: " + (err as Error).message);
+        setPrintError((err as Error).message || String(err));
       }
       return;
     }
@@ -322,7 +329,11 @@ const ReceiptModal = ({
     };
 
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) { cleanup(); return; }
+    if (!doc) {
+      cleanup();
+      setPrintError("Could not open the print document. Check that printing is not blocked for this page.");
+      return;
+    }
     doc.open();
     doc.write(html);
     doc.close();
@@ -330,14 +341,19 @@ const ReceiptModal = ({
     const trigger = () => {
       try {
         const w = iframe.contentWindow;
-        if (!w) { cleanup(); return; }
+        if (!w) {
+          cleanup();
+          setPrintError("The print window closed before it could open.");
+          return;
+        }
         w.focus();
         w.print();
         const onAfter = () => { w.removeEventListener("afterprint", onAfter); setTimeout(cleanup, 500); };
         w.addEventListener("afterprint", onAfter);
         setTimeout(cleanup, 30000);
-      } catch {
+      } catch (err) {
         cleanup();
+        setPrintError((err as Error).message || String(err));
       }
     };
 
@@ -513,6 +529,12 @@ const ReceiptModal = ({
             <p>Powered by Sale Point</p>
           </div>
         </div>
+
+        {printError && (
+          <p role="alert" className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            Print failed: {printError}
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={handleDownload}>

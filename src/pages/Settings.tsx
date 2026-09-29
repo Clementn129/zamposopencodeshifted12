@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +20,7 @@ import { generateOfflineId, queuePendingOp } from '@/lib/offlineStorage';
 import { getDrawerPin, setDrawerPin, isDrawerAutoOpen, setDrawerAutoOpen, isDesktopApp, openCashDrawer } from '@/lib/cashDrawer';
 import CashiersManager from '@/components/CashiersManager';
 import DiningTablesManager from '@/components/DiningTablesManager';
+import ReceiptModal from '@/components/ReceiptModal';
 
 const RECEIPT_SIZE_KEY = 'zampos.receiptSize';
 type ReceiptSizeSetting = '58mm' | '80mm' | 'a4';
@@ -58,6 +59,7 @@ const Settings = () => {
   // Cash drawer (desktop app only)
   const [drawerPin, setDrawerPinState] = useState<number>(() => getDrawerPin());
   const [drawerAutoOpen, setDrawerAutoOpenState] = useState<boolean>(() => isDrawerAutoOpen());
+  const [showTestReceipt, setShowTestReceipt] = useState(false);
 
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
@@ -501,6 +503,12 @@ const Settings = () => {
                   <SelectItem value="a4">A4 office printer</SelectItem>
                 </SelectContent>
               </Select>
+              <Button variant="outline" className="w-full" onClick={() => setShowTestReceipt(true)}>
+                <Printer className="mr-2 h-4 w-4" /> Test print
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Opens a sample receipt so you can confirm the paper size matches your printer before taking a sale.
+              </p>
             </CardContent>
           </Card>
 
@@ -632,6 +640,22 @@ const Settings = () => {
             <CashiersManager businessId={business.id} paymentCode={business.paymentCode} planTier={business.planTier} isRestaurant={isRestaurant} />
           ) : null}
         </main>
+
+        <ReceiptModal
+          open={showTestReceipt}
+          onClose={() => setShowTestReceipt(false)}
+          businessName={businessName || 'Your Business'}
+          businessDetails={{ phone, email, address, tpin }}
+          items={[
+            { name: 'Sample item A', price: 25, quantity: 2 },
+            { name: 'Sample item B', price: 12.5, quantity: 1 },
+          ]}
+          subtotal={62.5}
+          total={62.5}
+          paymentMethod="cash"
+          date={new Date().toISOString()}
+          receiptId="TEST-PRINT"
+        />
       </div>
     </>
   );
