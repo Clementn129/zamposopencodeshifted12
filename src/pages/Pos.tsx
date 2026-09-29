@@ -20,10 +20,11 @@ import DeliveryNoteTab from "@/components/DeliveryNoteTab";
 import InvoiceTab from "@/components/InvoiceTab";
 import { InvoicePrefill } from "@/components/InvoiceForm";
 import MenuModifierPicker, { ModifierPick } from "@/components/MenuModifierPicker";
+import QuickAddProduct from "@/components/QuickAddProduct";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
-import { useProducts } from "@/hooks/useProducts";
+import { useProducts, Product } from "@/hooks/useProducts";
 import { useSalesSync } from "@/hooks/useSalesSync";
 import { usePendingOpsSync } from "@/hooks/usePendingOpsSync";
 import { useDownstreamSync } from "@/hooks/useDownstreamSync";
@@ -47,6 +48,8 @@ type CartLine = {
   discountValue?: number;
   notes?: string;
   taxCategory?: TaxCategory;
+  /** Catalogue price when the line was added; differs from `price` only when overridden. */
+  catalogPrice?: number;
   modifiers?: Array<{ id: string; groupId: string; name: string; priceAdjustment: number }>;
 };
 
@@ -88,7 +91,7 @@ const Pos = () => {
 
   const { activeProducts, isLoading: productsLoading, isOnline, refetch: refetchProducts } = useProducts(business?.id);
   const { isSyncing, pendingCount, lastSyncError, syncNow } = useSalesSync(business?.id);
-  const { failedOps, retryFailedOps, clearFailedOps, syncNow: syncOpsNow } = usePendingOpsSync(business?.id);
+  const { failedOps, retryFailedOps, clearFailedOps, syncNow: syncOpsNow } = usePendingOpsSync(business?.id, business?.preventNegativeStock);
   const { isPulling, pullNow } = useDownstreamSync(business?.id);
   const { labels, isService, isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const { groups: modifierGroups, modifiersByGroup, groupIdsByProduct, isLoading: modifiersLoading } = useMenuModifiers(business?.id);
@@ -100,6 +103,7 @@ const Pos = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState("sale");
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [dnQuotation, setDnQuotation] = useState<{
     id: string;
     customerName: string | null;
@@ -207,40 +211,33 @@ const Pos = () => {
     return received - total;
   }, [amountReceived, total]);
 
-const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modifiers']; unitPrice?: number }) => {
-    const p = activeProducts.find((x) => x.id === productId);
-    if (!p) return;
+// Core add-to-cart. Split out from addToCart so Quick Sale can hand over a
+// product it has just created, which may not be in `activeProducts` yet.
+const addProductToCart = async (p: Product, opts?: { modifiers?: CartLine['modifiers']; unitPrice?: number }) => {
     const displayName = p.variantLabel ? `${p.name} · ${p.variantLabel}` : p.name;
-
-    // Restaurant items with modifier groups open the picker first.
-    const prodGroups = groupIdsByProduct[productId] ?? [];
-    const hasModifierOptions = prodGroups.some((gid) => (modifiersByGroup[gid] ?? []).length > 0);
-    if (isRestaurant && hasModifierOptions && !opts?.modifiers) {
-      setModifierProduct({
-        id: p.id,
-        name: displayName,
-        basePrice: p.price ?? 0,
-      });
-      return;
-    }
-
-    const lineId = computeLineId(productId, opts?.modifiers);
+    const lineId = computeLineId(p.id, opts?.modifiers);
     const existing = cart.find((l) => l.lineId === lineId);
     const nextQty = (existing?.quantity ?? 0) + 1;
-    if (p.itemType !== 'service' && nextQty > (p.stock ?? 0)) {
+    // Fail closed: only an explicit `false` lets stock go below zero, and
+    // trackStock === false means a quick-added item that is not counted yet.
+    const blockOnStock = business?.preventNegativeStock !== false;
+    if (blockOnStock && p.itemType !== 'service' && p.trackStock !== false && nextQty > (p.stock ?? 0)) {
       toast({ variant: "destructive", title: "Not enough stock", description: `${displayName} has only ${p.stock ?? 0} left.` });
       return;
     }
     const unitPrice = opts?.unitPrice ?? p.price ?? 0;
-    const next = existing && existing.price === unitPrice
+    const catalogPrice = p.price ?? 0;
+    // Same lineId = same product + modifier combo, so an existing line always
+    // keeps its price (including any override) when the quantity goes up.
+    const next = existing
       ? cart.map((l) => (l.lineId === lineId ? { ...l, quantity: nextQty } : l))
-      : [...cart, { lineId, productId, name: displayName, price: unitPrice, quantity: 1, costPrice: p.costPrice, taxCategory: p.taxCategory, modifiers: opts?.modifiers ?? [] }];
+      : [...cart, { lineId, productId: p.id, name: displayName, price: unitPrice, quantity: 1, costPrice: p.costPrice, taxCategory: p.taxCategory, modifiers: opts?.modifiers ?? [], catalogPrice }];
     setCart(next);
     await saveCartItem({
       lineId,
-      productId,
+      productId: p.id,
       name: displayName,
-      price: unitPrice,
+      price: existing ? existing.price : unitPrice,
       quantity: nextQty,
       costPrice: p.costPrice,
       discountType: existing?.discountType || null,
@@ -248,7 +245,34 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       notes: existing?.notes || "",
       taxCategory: p.taxCategory,
       modifiers: opts?.modifiers ?? [],
+      catalogPrice: existing?.catalogPrice ?? catalogPrice,
     });
+  };
+
+const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modifiers']; unitPrice?: number }) => {
+    const p = activeProducts.find((x) => x.id === productId);
+    if (!p) return;
+
+    // Restaurant items with modifier groups open the picker first.
+    const prodGroups = groupIdsByProduct[productId] ?? [];
+    const hasModifierOptions = prodGroups.some((gid) => (modifiersByGroup[gid] ?? []).length > 0);
+    if (isRestaurant && hasModifierOptions && !opts?.modifiers) {
+      setModifierProduct({
+        id: p.id,
+        name: p.variantLabel ? `${p.name} · ${p.variantLabel}` : p.name,
+        basePrice: p.price ?? 0,
+      });
+      return;
+    }
+
+    await addProductToCart(p, opts);
+  };
+
+  // Quick Sale: take the resolved product (existing match or freshly created)
+  // straight into the cart, then refresh the list in the background.
+  const handleQuickResolved = async (p: Product) => {
+    await addProductToCart(p);
+    void refetchProducts();
   };
 
   // Barcode scanner support — works with any USB/Bluetooth keyboard-wedge
@@ -310,6 +334,23 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     const existing = cart.find((l) => l.lineId === lineId);
     if (!existing) return;
     const updated = { ...existing, notes };
+    setCart(prev => prev.map((l) => (l.lineId === lineId ? updated : l)));
+    await saveCartItem(updated);
+  };
+
+  // Overrides the selling price for one line. The product's catalogue price is
+  // never written — only this line's `price` changes, and `catalogPrice` keeps
+  // the original so reports can quantify the difference.
+  const updateItemPrice = async (lineId: string, raw: string) => {
+    const existing = cart.find((l) => l.lineId === lineId);
+    if (!existing) return;
+    const trimmed = raw.trim();
+    // Blank/invalid input never lands in the cart — the last valid price stands.
+    if (trimmed === '') return;
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value < 0) return;
+    if (value === existing.price) return;
+    const updated = { ...existing, price: value };
     setCart(prev => prev.map((l) => (l.lineId === lineId ? updated : l)));
     await saveCartItem(updated);
   };
@@ -400,10 +441,22 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       id: saleId, businessId: business.id,
       items: cart.map((l) => {
         const p = activeProducts.find((x) => x.id === l.productId);
+        // Unit price actually charged, after the line discount.
+        // Mirrors the arithmetic in the `subtotal` memo above.
+        const lineTotal = l.price * l.quantity;
+        let discountedLine = lineTotal;
+        if (l.discountType === 'percentage' && l.discountValue) {
+          discountedLine = lineTotal * (1 - l.discountValue / 100);
+        } else if (l.discountType === 'amount' && l.discountValue) {
+          discountedLine = Math.max(0, lineTotal - l.discountValue);
+        }
+        const finalSalePrice = l.quantity > 0 ? discountedLine / l.quantity : l.price;
         return { 
           productId: l.productId, 
           name: l.name, 
           price: l.price, 
+          catalogPrice: l.catalogPrice ?? p?.price ?? l.price,
+          finalSalePrice,
           quantity: l.quantity,
           costPrice: p?.costPrice || l.costPrice || null,
           discountType: l.discountType || null,
@@ -435,7 +488,13 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       await saveOfflineSale(salePayload);
       for (const line of cart) {
         const p = activeProducts.find((x) => x.id === line.productId);
-        await updateCachedProductStock(line.productId, Math.max(0, Number(p?.stock ?? 0) - line.quantity));
+        // Quick-added items are not counted until someone enters a real stock.
+        if (p?.trackStock === false) continue;
+        const nextStock = Number(p?.stock ?? 0) - line.quantity;
+        await updateCachedProductStock(
+          line.productId,
+          business?.preventNegativeStock === false ? nextStock : Math.max(0, nextStock),
+        );
       }
 
       let returnedSaleId: string | null = null;
@@ -773,6 +832,14 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
           }
         }}
       />
+      <QuickAddProduct
+        open={quickAddOpen}
+        onOpenChange={setQuickAddOpen}
+        businessId={business.id}
+        isOnline={isOnline}
+        products={activeProducts}
+        onResolved={handleQuickResolved}
+      />
       <Dialog open={tablePickerOpen} onOpenChange={setTablePickerOpen}>
         <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -915,6 +982,14 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                         data-scanner-target="true"
                       />
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 w-full"
+                      onClick={() => setQuickAddOpen(true)}
+                    >
+                      <Plus className="h-4 w-4 mr-2" /> Quick sale — add a new item
+                    </Button>
                   </CardHeader>
                   <CardContent className="space-y-3 max-h-[50vh] sm:max-h-[60vh] overflow-y-auto">
                     {Object.keys(groupedProducts).length === 0 ? (
@@ -979,6 +1054,25 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                             {l.modifiers.map((m) => (m.priceAdjustment > 0 ? `${m.name} (+K${m.priceAdjustment.toFixed(2)})` : m.priceAdjustment < 0 ? `${m.name} (-K${Math.abs(m.priceAdjustment).toFixed(2)})` : m.name)).join(" · ")}
                           </p>
                         )}
+                        {/* Unit price override */}
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-xs text-muted-foreground w-20 shrink-0">Unit price</span>
+                          <Input
+                            key={`price-${l.lineId}`}
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            defaultValue={l.price}
+                            onChange={(e) => updateItemPrice(l.lineId, e.target.value)}
+                            className="w-24 h-8 text-xs"
+                            aria-label={`Unit price for ${l.name}`}
+                          />
+                          {l.catalogPrice != null && Math.abs(l.price - l.catalogPrice) > 0.001 && (
+                            <span className="text-xs text-muted-foreground">
+                              catalog ZMW {l.catalogPrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                         {/* Item discount */}
                         <div className="flex items-center gap-2 mt-2">
                           <Select 

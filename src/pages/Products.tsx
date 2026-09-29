@@ -76,7 +76,8 @@ const Products = () => {
   const { isLocked } = checkSubscriptionStatus();
   const { products, isLoading: productsLoading, error, isOnline, refetch } = useProducts(business?.id);
   const { isSyncing: stockSyncing, pendingCount: stockPending, syncNow: syncStockNow } = useStockSync(
-    business?.id
+    business?.id,
+    business?.preventNegativeStock
   );
   const { labels, isService, isHybrid, isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const {
@@ -299,6 +300,11 @@ const Products = () => {
         item_type: resolvedItemType,
         track_expiry: trackExpiry && !isServiceItem,
         expiry_date: trackExpiry && !isServiceItem && expiryDate ? expiryDate : null,
+        // Quick-added items are created untracked (stock 0). Saving a different
+        // stock count here is the moment it becomes counted inventory.
+        ...(editing
+          ? { track_stock: (isServiceItem ? 0 : stockNum) !== editing.stock || editing.trackStock !== false }
+          : {}),
       };
 
       if (isOnline) {
@@ -442,7 +448,10 @@ const Products = () => {
       return;
     }
     const stockChange = adjustmentType === "add" ? adjustmentValue : -adjustmentValue;
-    const newStock = Math.max(0, selectedProduct.stock + stockChange);
+    // Fail closed: only an explicit `false` lets stock go below zero.
+    const newStock = business.preventNegativeStock === false
+      ? selectedProduct.stock + stockChange
+      : Math.max(0, selectedProduct.stock + stockChange);
 
     setSaving(true);
     try {

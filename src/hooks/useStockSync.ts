@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getUnsyncedStockUpdates, markStockUpdateAsSynced } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
-export function useStockSync(businessId: string | undefined) {
+export function useStockSync(businessId: string | undefined, preventNegativeStock?: boolean) {
   const { isOnline } = useOnlineStatus();
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -56,7 +56,10 @@ export function useStockSync(businessId: string | undefined) {
           if (productError) throw productError;
 
           const currentStock = Number(pRow?.stock ?? 0);
-          const newStock = Math.max(0, currentStock + change.netChange);
+          // Fail closed: only an explicit `false` lets stock go below zero.
+          const newStock = preventNegativeStock === false
+            ? currentStock + change.netChange
+            : Math.max(0, currentStock + change.netChange);
           const { error: stockError } = await supabase
             .from("products")
             .update({ stock: newStock })
@@ -88,7 +91,7 @@ export function useStockSync(businessId: string | undefined) {
         }
       }
     }
-  }, [businessId, isOnline, checkPendingCount]);
+  }, [businessId, isOnline, checkPendingCount, preventNegativeStock]);
 
   useEffect(() => {
     void checkPendingCount();

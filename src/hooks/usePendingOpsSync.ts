@@ -37,7 +37,7 @@ const resolveInvoiceId = async (id: string): Promise<string | null> => {
   return data?.id ?? null;
 };
 
-export function usePendingOpsSync(businessId: string | undefined) {
+export function usePendingOpsSync(businessId: string | undefined, preventNegativeStock?: boolean) {
   const { isOnline } = useOnlineStatus();
   const [failedOps, setFailedOps] = useState<Array<{
     id: string;
@@ -182,31 +182,48 @@ export function usePendingOpsSync(businessId: string | undefined) {
             }
 
             case 'product_create': {
-              const imageUrl = await resolvePendingImageUrl(op.payload.image_url, businessId);
               const tempId = op.payload.tempId;
-              const { data: created, error: createErr } = await supabase.from('products').insert({
-                business_id: businessId,
-                is_active: true,
-                name: op.payload.name,
-                price: op.payload.price,
-                cost_price: op.payload.cost_price ?? op.payload.costPrice,
-                stock: op.payload.stock,
-                minimum_stock: op.payload.minimum_stock ?? op.payload.minimumStock,
-                category: op.payload.category,
-                tax_category: op.payload.tax_category ?? op.payload.taxCategory ?? 'taxable',
-                barcode: op.payload.barcode || null,
-                item_type: op.payload.item_type ?? op.payload.itemType ?? 'product',
-                image_url: imageUrl,
-                track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
-                expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
-              }).select('id');
-              if (createErr) throw createErr;
-              const newProductId = created?.[0]?.id;
+              // Cashiers have no INSERT rights on products (RLS is owner-only), so a
+              // quick-add made offline must replay through the member-callable function.
+              const isQuickAdd = op.payload.quickAdd === true;
+              let newProductId: string | undefined;
+
+              if (isQuickAdd) {
+                const { data: quickId, error: quickErr } = await supabase.rpc('quick_add_product', {
+                  p_business_id: businessId,
+                  p_name: op.payload.name,
+                  p_price: op.payload.price,
+                });
+                if (quickErr) throw quickErr;
+                newProductId = quickId || undefined;
+              } else {
+                const imageUrl = await resolvePendingImageUrl(op.payload.image_url, businessId);
+                const { data: created, error: createErr } = await supabase.from('products').insert({
+                  business_id: businessId,
+                  is_active: true,
+                  name: op.payload.name,
+                  price: op.payload.price,
+                  cost_price: op.payload.cost_price ?? op.payload.costPrice,
+                  stock: op.payload.stock,
+                  minimum_stock: op.payload.minimum_stock ?? op.payload.minimumStock,
+                  category: op.payload.category,
+                  tax_category: op.payload.tax_category ?? op.payload.taxCategory ?? 'taxable',
+                  barcode: op.payload.barcode || null,
+                  item_type: op.payload.item_type ?? op.payload.itemType ?? 'product',
+                  image_url: imageUrl,
+                  track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
+                  track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
+                  expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
+                }).select('id');
+                if (createErr) throw createErr;
+                newProductId = created?.[0]?.id;
+              }
 
               // If this product was created offline with a temp ID, any sales that synced
               // before this product existed will have items referencing the temp ID.
-              // Decrement stock for those sales now.
-              if (tempId && newProductId) {
+              // Decrement stock for those sales now. Quick-adds are untracked (stock 0),
+              // so they never get this fixup.
+              if (tempId && newProductId && !isQuickAdd) {
                 try {
                   const { data: affectedSales } = await supabase
                     .from('sales')
@@ -226,7 +243,10 @@ export function usePendingOpsSync(businessId: string | undefined) {
                     }
                     if (totalQty > 0) {
                       await supabase.from('products').update({
-                        stock: Math.max(0, Number(op.payload.stock || 0) - totalQty),
+                        // Fail closed: only an explicit `false` lets stock go below zero.
+                        stock: preventNegativeStock === false
+                          ? Number(op.payload.stock || 0) - totalQty
+                          : Math.max(0, Number(op.payload.stock || 0) - totalQty),
                       }).eq('id', newProductId);
                     }
                   }
@@ -253,6 +273,7 @@ export function usePendingOpsSync(businessId: string | undefined) {
                 item_type: op.payload.item_type ?? op.payload.itemType,
                 image_url: imageUrl,
                 track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
+                track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
                 expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
               }).eq('id', op.payload.productId);
               if (updateErr) throw updateErr;
@@ -610,7 +631,7 @@ export function usePendingOpsSync(businessId: string | undefined) {
       globalOpsSyncInFlight = false;
       void refreshFailedOps();
     }
-  }, [businessId, isOnline, refreshFailedOps]);
+  }, [businessId, isOnline, refreshFailedOps, preventNegativeStock]);
 
   const retryFailedOps = useCallback(async (opIds: string[]) => {
     if (!businessId || opIds.length === 0) return;

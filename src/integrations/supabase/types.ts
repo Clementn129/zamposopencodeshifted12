@@ -309,6 +309,7 @@ export type Database = {
           payment_code: string
           phone: string | null
           plan_tier: string | null
+          prevent_negative_stock: boolean
           smart_invoice_branch_id: string | null
           smart_invoice_device_id: string | null
           smart_invoice_enabled: boolean
@@ -339,6 +340,7 @@ export type Database = {
           payment_code: string
           phone?: string | null
           plan_tier?: string | null
+          prevent_negative_stock?: boolean
           smart_invoice_branch_id?: string | null
           smart_invoice_device_id?: string | null
           smart_invoice_enabled?: boolean
@@ -369,6 +371,7 @@ export type Database = {
           payment_code?: string
           phone?: string | null
           plan_tier?: string | null
+          prevent_negative_stock?: boolean
           smart_invoice_branch_id?: string | null
           smart_invoice_device_id?: string | null
           smart_invoice_enabled?: boolean
@@ -1282,6 +1285,7 @@ export type Database = {
           stock: number
           tax_category: string
           track_expiry: boolean
+          track_stock: boolean
           updated_at: string
           variant_label: string | null
         }
@@ -1303,6 +1307,7 @@ export type Database = {
           stock?: number
           tax_category?: string
           track_expiry?: boolean
+          track_stock?: boolean
           updated_at?: string
           variant_label?: string | null
         }
@@ -1324,6 +1329,7 @@ export type Database = {
           stock?: number
           tax_category?: string
           track_expiry?: boolean
+          track_stock?: boolean
           updated_at?: string
           variant_label?: string | null
         }
@@ -2018,6 +2024,10 @@ export type Database = {
       owns_business: { Args: { _business_id: string }; Returns: boolean }
       pay_invoice: {
         Args: { p_invoice_id: string; p_payment_method?: string }
+        Returns: string
+      }
+      quick_add_product: {
+        Args: { p_business_id: string; p_name: string; p_price: number }
         Returns: string
       }
       record_sale_payment: {

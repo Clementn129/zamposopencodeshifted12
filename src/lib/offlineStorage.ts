@@ -80,6 +80,8 @@ interface OfflineProduct {
   imagePath?: string | null;
   parentId?: string | null;
   variantLabel?: string | null;
+  /** false = quick-added item whose stock is not counted yet. */
+  trackStock?: boolean;
   trackExpiry?: boolean;
   expiryDate?: string | null;
 }
@@ -110,6 +112,8 @@ interface CachedBusiness {
   logoUrl?: string | null;
   vatNumber?: string | null;
   businessType?: string | null;
+  /** Absent on older caches -> must be read as `true` (block negatives). */
+  preventNegativeStock?: boolean;
   cachedForUser?: string;
 }
 
@@ -570,6 +574,8 @@ interface CartItem {
   discountValue?: number;
   notes?: string;
   taxCategory?: 'taxable' | 'zero_rated' | 'exempt';
+  /** Product's catalogue price when the line was added. Differs from `price` only when overridden. */
+  catalogPrice?: number;
   modifiers?: Array<{ id: string; groupId: string; name: string; priceAdjustment: number }>;
 }
 

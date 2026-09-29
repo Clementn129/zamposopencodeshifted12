@@ -229,16 +229,19 @@ const Debtors = () => {
   const addToCreditCart = (productId: string) => {
     const p = activeProducts.find(x => x.id === productId);
     if (!p) return;
+    // Fail closed: only an explicit `false` lets stock go below zero, and
+    // trackStock === false means a quick-added item that is not counted yet.
+    const blockOnStock = business?.preventNegativeStock !== false;
     setCreditCart(prev => {
       const existing = prev.find(l => l.productId === productId);
       if (existing) {
         const nextQty = existing.quantity + 1;
-        if (p.itemType !== 'service' && nextQty > (p.stock ?? 0)) {
+        if (blockOnStock && p.itemType !== 'service' && p.trackStock !== false && nextQty > (p.stock ?? 0)) {
           return prev;
         }
         return prev.map(l => l.productId === productId ? { ...l, quantity: nextQty } : l);
       }
-      if (p.itemType !== 'service' && p.stock <= 0) return prev;
+      if (blockOnStock && p.itemType !== 'service' && p.trackStock !== false && p.stock <= 0) return prev;
       return [...prev, { productId, name: p.variantLabel ? `${p.name} · ${p.variantLabel}` : p.name, price: p.price ?? 0, quantity: 1, stock: p.stock ?? 0 }];
     });
   };
@@ -324,7 +327,13 @@ const Debtors = () => {
       for (const line of creditCart) {
         const p = activeProducts.find(x => x.id === line.productId);
         if (p) {
-          await updateCachedProductStock(line.productId, Math.max(0, Number(p.stock ?? 0) - line.quantity));
+          // Quick-added items are not counted until someone enters a real stock.
+          if (p.trackStock === false) continue;
+          const nextStock = Number(p.stock ?? 0) - line.quantity;
+          await updateCachedProductStock(
+            line.productId,
+            business?.preventNegativeStock === false ? nextStock : Math.max(0, nextStock),
+          );
         }
       }
 

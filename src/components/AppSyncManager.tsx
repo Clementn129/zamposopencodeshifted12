@@ -13,9 +13,9 @@ export const AppSyncManager = () => {
   const { business, refetch: refetchBusiness } = useBusiness(!isLoading ? user?.id : undefined);
 
   useSalesSync(business?.id);
-  useStockSync(business?.id);
+  useStockSync(business?.id, business?.preventNegativeStock);
   useRealtimeSync(business?.id);
-  usePendingOpsSync(business?.id);
+  usePendingOpsSync(business?.id, business?.preventNegativeStock);
   useDownstreamSync(business?.id);
 
   // Stable ref so the effect doesn't re-create the channel when refetchBusiness

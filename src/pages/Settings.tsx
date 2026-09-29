@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -61,6 +61,10 @@ const Settings = () => {
   const [drawerAutoOpen, setDrawerAutoOpenState] = useState<boolean>(() => isDrawerAutoOpen());
   const [showTestReceipt, setShowTestReceipt] = useState(false);
 
+  // Inventory guard: optimistically true (block negatives) until the row loads.
+  const [preventNeg, setPreventNeg] = useState(true);
+  const [preventNegSaving, setPreventNegSaving] = useState(false);
+
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
     setDrawerPinState(pin);
@@ -79,6 +83,48 @@ const Settings = () => {
       toast({ title: 'Cash drawer opened', description: 'If it did not move, check the drawer cable and pin number.' });
     } else {
       toast({ variant: 'destructive', title: 'Could not open cash drawer', description: result });
+    }
+  };
+
+  const handlePreventNegChange = async (enabled: boolean) => {
+    if (!business?.id) return;
+    const previous = preventNeg;
+    setPreventNeg(enabled);
+    setPreventNegSaving(true);
+    const updates = {
+      prevent_negative_stock: enabled,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Saved offline', description: 'The new stock rule will sync when connected.' });
+        return;
+      }
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+      toast({
+        title: enabled ? 'Negative stock blocked' : 'Negative stock allowed',
+        description: enabled
+          ? 'Sales stop once an item runs out.'
+          : 'Sales can push an item below zero stock.',
+      });
+      await refetch();
+    } catch (e) {
+      setPreventNeg(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save this setting',
+      });
+    } finally {
+      setPreventNegSaving(false);
     }
   };
 
@@ -113,6 +159,7 @@ const Settings = () => {
       setVatRate(String(business.vatRate ?? 16));
       setCustomTaxName(business.customTaxName || '');
       setCustomTaxRate(business.customTaxRate != null ? String(business.customTaxRate) : '');
+      setPreventNeg(business.preventNegativeStock !== false);
     }
   }, [business]);
 
@@ -555,6 +602,38 @@ const Settings = () => {
               </CardContent>
             </Card>
           )}
+
+          {/* Inventory */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Package className="h-5 w-5" /> Inventory</CardTitle>
+              <CardDescription>
+                Decides what happens when a sale would take stock below zero.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                <div>
+                  <Label htmlFor="prevent-negative-stock">Prevent negative inventory</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {preventNeg
+                      ? 'ON — a sale stops once an item runs out.'
+                      : 'OFF — stock may be pushed below zero.'}
+                  </p>
+                </div>
+                <Switch
+                  id="prevent-negative-stock"
+                  checked={preventNeg}
+                  disabled={preventNegSaving}
+                  onCheckedChange={handlePreventNegChange}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                On by default for every business. Turn it off only if you deliberately sell items
+                you have not received yet.
+              </p>
+            </CardContent>
+          </Card>
 
           {/* Tax Configuration */}
           <Card>

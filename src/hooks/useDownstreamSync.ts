@@ -37,7 +37,7 @@ export function useDownstreamSync(businessId: string | undefined) {
         const [{ data: products }, { data: debtors }, { data: serverSales }] = await Promise.all([
           supabase
             .from("products")
-            .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, expiry_date")
+            .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, track_stock, expiry_date")
             .eq("business_id", businessId)
             .order("created_at", { ascending: false })
             .limit(25000),
@@ -75,6 +75,7 @@ export function useDownstreamSync(businessId: string | undefined) {
             parentId: p.parent_id,
             variantLabel: p.variant_label,
             trackExpiry: p.track_expiry ?? false,
+            trackStock: p.track_stock ?? true,
             expiryDate: p.expiry_date ?? null,
           }));
 

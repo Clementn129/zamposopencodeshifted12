@@ -152,6 +152,36 @@ const Reports = () => {
     return { revenue, tax, cogs, grossProfit, netProfit, businessExp, drawings, outstanding, count: active.length, byPayment, byCashier };
   }, [sales, expenses, debtors]);
 
+  // Price-override leakage: lines sold above or below their catalogue price.
+  // Older sales carry no catalogPrice/finalSalePrice at all, so they are
+  // skipped rather than treated as zero — the card hides until real data exists.
+  const overrides = useMemo(() => {
+    let comparableLines = 0;
+    let overrideLines = 0;
+    let givenAway = 0;
+    let chargedExtra = 0;
+    for (const s of sales) {
+      if (s.status === "refunded") continue;
+      const items = Array.isArray(s.items) ? s.items : [];
+      for (const it of items) {
+        const qty = Number(it?.quantity) || 0;
+        const catalog = it?.catalogPrice;
+        const final = it?.finalSalePrice;
+        if (qty <= 0 || catalog == null || final == null) continue;
+        const c = Number(catalog);
+        const f = Number(final);
+        if (!Number.isFinite(c) || !Number.isFinite(f)) continue;
+        comparableLines++;
+        const diff = (c - f) * qty;
+        if (Math.abs(diff) < 0.005) continue;
+        overrideLines++;
+        if (diff > 0) givenAway += diff;
+        else chargedExtra += -diff;
+      }
+    }
+    return { comparableLines, overrideLines, givenAway, chargedExtra };
+  }, [sales]);
+
   const exportCsv = () => {
     const rows: string[] = [];
     rows.push("Sale Point Report");
@@ -272,6 +302,29 @@ const Reports = () => {
                   ))}
                 </CardContent>
               </Card>
+
+              {overrides.comparableLines > 0 && (
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-base">Price Overrides</CardTitle></CardHeader>
+                  <CardContent className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span>Priced differently from the catalogue</span>
+                      <span>{overrides.overrideLines} of {overrides.comparableLines} lines</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Sold below catalogue price</span>
+                      <span className={overrides.givenAway > 0 ? "text-destructive" : undefined}>{formatZMW(overrides.givenAway)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Sold above catalogue price</span>
+                      <span>{formatZMW(overrides.chargedExtra)}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground pt-1">
+                      Ignores discounts applied at the line or sale level.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
             </>
           )}
         </main>

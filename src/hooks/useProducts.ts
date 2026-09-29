@@ -21,6 +21,8 @@ export type Product = {
   barcode: string | null;
   isActive: boolean;
   itemType: ItemType;
+  /** false = quick-added item whose stock is not counted yet. */
+  trackStock: boolean;
   taxCategory: 'taxable' | 'zero_rated' | 'exempt';
   imageUrl: string | null;
   imagePath: string | null;
@@ -44,6 +46,7 @@ const mapRowToProduct = (row: ProductRow): Product => ({
   barcode: (row as any).barcode ?? null,
   isActive: row.is_active,
   itemType: (((row as any).item_type ?? 'product') === 'service' ? 'service' : 'product'),
+  trackStock: row.track_stock !== false,
   taxCategory: (row.tax_category ?? 'taxable') as Product['taxCategory'],
   imageUrl: null,
   imagePath: (row as any).image_url ?? null,
@@ -69,6 +72,7 @@ const mapCachedProduct = (p: CachedProduct): Product => ({
   expiryDate: (p as any).expiryDate ?? null,
   isActive: p.isActive !== false,
   itemType: (((p as any).itemType ?? 'product') === 'service' ? 'service' : 'product'),
+  trackStock: p.trackStock !== false,
   taxCategory: ((p as any).taxCategory ?? 'taxable') as Product['taxCategory'],
   imageUrl: (p as any).imageUrl ?? null,
   imagePath: (p as any).imagePath ?? null,
@@ -222,7 +226,7 @@ export function useProducts(businessId: string | undefined) {
     try {
       let dbQuery = supabase
         .from("products")
-        .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at", { count: "exact" })
+        .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at", { count: "exact" })
         .eq("business_id", businessId)
         .eq("is_active", true);
 
@@ -290,7 +294,7 @@ export function useProducts(businessId: string | undefined) {
 
         const { data, error: fetchError } = await supabase
           .from("products")
-          .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at")
+          .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at")
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
           .limit(25000);
@@ -327,6 +331,7 @@ export function useProducts(businessId: string | undefined) {
             category: p.category,
             barcode: p.barcode,
             trackExpiry: p.trackExpiry,
+            trackStock: p.trackStock,
             expiryDate: p.expiryDate,
             isActive: p.isActive,
             itemType: p.itemType,

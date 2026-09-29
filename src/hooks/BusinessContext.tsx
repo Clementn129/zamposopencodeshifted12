@@ -44,6 +44,8 @@ export interface Business {
   customTaxRate?: number | null;
   planTier?: string | null;
   businessType?: string | null;
+  /** Opt-in flag. Absent/undefined must be treated as `true` (block negatives). */
+  preventNegativeStock: boolean;
 }
 
 export interface BusinessGroupEntry {
@@ -93,6 +95,7 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
     ? String((row as unknown as Record<string, unknown>).plan_tier)
     : null,
   businessType: row.business_type ?? null,
+  preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
 });
 
 const isElectronBiz = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
@@ -160,6 +163,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       logoUrl: row.logo_url,
       vatNumber: row.vat_number,
       businessType: row.business_type ?? null,
+      preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
     }, user?.id);
   }, [user?.id]);
 
@@ -188,6 +192,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         logoUrl: cachedBiz.logoUrl ?? null,
         vatNumber: cachedBiz.vatNumber ?? null,
         businessType: cachedBiz.businessType ?? null,
+        preventNegativeStock: cachedBiz.preventNegativeStock !== false,
       });
       return;
     }
@@ -206,6 +211,8 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       lastSyncAt: new Date(cached.lastSyncAt),
       taxMode: 'none',
       vatRate: 16,
+      // No cached business row at all -> fail closed (match today's behaviour).
+      preventNegativeStock: true,
     });
   }, [user?.id]);
 
