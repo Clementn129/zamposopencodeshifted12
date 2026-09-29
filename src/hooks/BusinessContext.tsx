@@ -334,26 +334,46 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
           setRootBusinessId(group.rootId);
         }
 
-        // Decide which business to show.
-        let activeId: string | null = targetId ?? null;
-        if (!activeId) {
-          // Resolve default: owner's root first; fall back to get_my_business_id
-          activeId = rootBusinessIdRef.current;
+        // Decide which business to show. Candidates, best first: the branch the
+        // caller asked for, then the branch this user was last on (persisted by
+        // loadBusinessRow), then head office. Every candidate is validated by
+        // loadBusinessRow, which returns null under RLS when the user is not a
+        // member — so a stale or another account's cached id can never win.
+        const seenIds = new Set<string>();
+        const cachedId = (await getCachedBusiness(uid))?.id;
+        const candidates: Array<{ id: string | null | undefined; source: string }> = [
+          { id: targetId, source: 'target' },
+          { id: cachedId, source: 'last-used' },
+          { id: rootBusinessIdRef.current, source: 'root' },
+        ];
+        let resolved = false;
+        for (const candidate of candidates) {
+          if (!candidate.id || seenIds.has(candidate.id)) continue;
+          seenIds.add(candidate.id);
+          const row = await loadBusinessRow(candidate.id);
+          if (row) {
+            resolved = true;
+            console.debug('[business] resolved', candidate.id, candidate.source);
+            break;
+          }
         }
-        if (!activeId) {
+        if (!resolved) {
           const { data: bizId } = await supabase.rpc('get_my_business_id');
-          activeId = (bizId as string) ?? null;
+          const row = bizId ? await loadBusinessRow(bizId as string) : null;
+          if (row) {
+            resolved = true;
+            console.debug('[business] resolved', bizId, 'rpc');
+          }
         }
-        if (!activeId) {
+        if (!resolved) {
           // No business could be resolved from the server (unreachable, or
           // this account genuinely has none). Fall back to the cached business
           // so a dead or flaky connection can never blank out a perfectly good
           // local session. If nothing is cached either, business stays null.
+          console.debug('[business] unresolved, using cached business');
           await loadCachedBusiness();
           return;
         }
-
-        await loadBusinessRow(activeId);
       } catch (err: unknown) {
         console.error('Error fetching business:', err);
         const msg = err instanceof Error ? err.message : 'Failed to load business data';
@@ -435,10 +455,13 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [business]);
 
-  // Initial load + when user changes
+  // Initial load + when user changes or connectivity flaps. Pass the active
+  // id so a re-run (fetchAll's identity depends on isOnline) reloads the branch
+  // the user is actually on instead of re-resolving a default — that is what
+  // briefly swapped multi-branch owners back to head office.
   useEffect(() => {
     if (authLoading) return;
-    void fetchAll();
+    void fetchAll(businessRef.current?.id ?? undefined);
     return () => clearLoadingTimer();
   }, [fetchAll, authLoading, clearLoadingTimer]);
 
@@ -449,7 +472,9 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     const handler = (evt: Event) => {
       const detail = (evt as CustomEvent<{ businessId?: string }>).detail;
       const current = businessRef.current;
-      void fetchAll(detail?.businessId ?? current?.id);
+      // Never fall through to an argless call: with no detail AND no committed
+      // business we still want the last-used/rpc chain, not a bare default.
+      void fetchAll(detail?.businessId ?? current?.id ?? undefined);
     };
     window.addEventListener('zampos:business-changed', handler);
     return () => window.removeEventListener('zampos:business-changed', handler);

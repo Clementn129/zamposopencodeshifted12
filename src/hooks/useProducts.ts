@@ -367,6 +367,18 @@ export function useProducts(businessId: string | undefined) {
     }
   }, [businessId]);
 
+  // A business/branch change must never leave the previous branch's rows on
+  // screen. This is declared BEFORE the refetch effect below so React flushes
+  // the clear first — otherwise the POS renders the other branch's catalogue
+  // until the (async) replacement lands, which is exactly the reported flash.
+  useEffect(() => {
+    blobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    blobUrlsRef.current = [];
+    setProducts([]);
+    setIsLoading(true);
+    setError(null);
+  }, [businessId]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
