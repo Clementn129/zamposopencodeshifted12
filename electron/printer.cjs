@@ -93,21 +93,24 @@ function parseAndPrint(text, paperWidthMm) {
       const boldOn = /<b>/.test(content);
       const fontBig = /<font size='big'>/.test(content);
       const fontTall = /<font size='tall'>/.test(content);
-      const fontSmall = /<font size='small'>/.test(content);
 
       content = content
         .replace(/<\/?b>/g, "")
         .replace(/<\/?font[^>]*>/g, "");
 
-      if (boldOn) p.bold();
-      if (fontBig) p.size(2, 2);
-      else if (fontTall) p.size(1, 2);
-      else if (fontSmall) p.size(0.5, 0.5);
+      // escpos has no Printer.prototype.bold() -- calling it throws and the
+      // whole job rejects. Style is the real API ('B' / 'Normal').
+      if (boldOn) p.style("B");
+      // escpos size() takes 0-based codes: 0 = normal, 1 = double, 2 = triple.
+      // ESC/POS character cells cannot go below normal, so size='small' just
+      // prints at normal size rather than emitting a garbage GS ! byte.
+      if (fontBig) p.size(1, 1);
+      else if (fontTall) p.size(0, 1);
 
       p.text(content);
 
-      if (boldOn) p.bold(false);
-      if (fontBig || fontTall || fontSmall) p.size(1, 1);
+      if (boldOn) p.style("Normal");
+      if (fontBig || fontTall) p.size(0, 0);
     }
 
     p.cut();

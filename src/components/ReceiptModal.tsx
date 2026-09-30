@@ -55,7 +55,7 @@ const escapeHtml = (str: string | null | undefined): string => {
 const sizeStyles: Record<ReceiptSize, { pageRule: string; printRule: string; previewWidth: number; bodyWidth: string; baseFont: string; headerFont: string; totalFont: string; padding: string; priceWidth: string; qtyWidth: string }> = {
   "58mm": {
     pageRule: "@page { margin: 0; }",
-    printRule: "html, body { width: 58mm; } body { padding: 2mm 2.5mm; }",
+    printRule: "html, body { width: 58mm; } body { padding: 2mm 2.5mm; -webkit-font-smoothing: none; -webkit-text-stroke: 0.2px #000; }",
     previewWidth: 219,
     bodyWidth: "58mm",
     baseFont: "11px",
@@ -67,7 +67,7 @@ const sizeStyles: Record<ReceiptSize, { pageRule: string; printRule: string; pre
   },
   "80mm": {
     pageRule: "@page { margin: 0; }",
-    printRule: "html, body { width: 80mm; } body { padding: 3mm 4mm; }",
+    printRule: "html, body { width: 80mm; } body { padding: 3mm 4mm; -webkit-font-smoothing: none; -webkit-text-stroke: 0.2px #000; }",
     previewWidth: 302,
     bodyWidth: "80mm",
     baseFont: "12px",
@@ -161,7 +161,7 @@ const ReceiptModal = ({
           <tbody>
             ${items.map(i => `
               <tr style="border-bottom:1px dashed #ccc;">
-                <td style="padding:6px 4px;">${escapeHtml(i.name)}${i.notes ? ` <span style="color:#666;font-size:11px">(${escapeHtml(i.notes)})</span>` : ""}</td>
+                <td style="padding:6px 4px;">${escapeHtml(i.name)}${i.notes ? ` <span style="color:#000;font-size:11px">(${escapeHtml(i.notes)})</span>` : ""}</td>
                 <td style="text-align:center;padding:6px 4px;">${i.quantity}</td>
                 <td style="text-align:right;padding:6px 4px;">ZMW ${i.price.toFixed(2)}</td>
                 <td style="text-align:right;padding:6px 4px;">ZMW ${(i.price * i.quantity).toFixed(2)}</td>
@@ -171,7 +171,7 @@ const ReceiptModal = ({
       : `<div class="items">
           ${items.map(i => `
             <div class="item">
-              <span class="item-name">${escapeHtml(i.name)}${i.notes ? ` <span style="color:#666;font-size:10px">(${escapeHtml(i.notes)})</span>` : ""}</span>
+              <span class="item-name">${escapeHtml(i.name)}${i.notes ? ` <span style="color:#000;font-size:10px">(${escapeHtml(i.notes)})</span>` : ""}</span>
               <span class="item-qty">${qtyPrefix}${i.quantity}</span>
               <span class="item-price">ZMW ${(i.price * i.quantity).toFixed(2)}</span>
             </div>`).join("")}
@@ -188,7 +188,7 @@ const ReceiptModal = ({
             body { font-family: ${fontFamily}; margin: 0; background: white; color: black; font-size: ${styles.baseFont}; padding: ${styles.padding}; width: ${styles.bodyWidth}; overflow-wrap: anywhere; }
             .header { text-align: center; margin-bottom: 12px; }
             .header h1 { font-size: ${styles.headerFont}; margin: 0 0 4px 0; line-height: 1.15; overflow-wrap: anywhere; }
-            .header p { margin: 2px 0; font-size: ${styles.baseFont}; color: #444; }
+            .header p { margin: 2px 0; font-size: ${styles.baseFont}; color: #000; }
             .divider { border-top: 1px dashed #000; margin: 8px 0; }
             .item { display: grid; grid-template-columns: minmax(0, 1fr) ${styles.qtyWidth} ${styles.priceWidth}; align-items: start; font-size: ${styles.baseFont}; margin: 4px 0; gap: 2mm; }
             .item-name { min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
@@ -199,7 +199,7 @@ const ReceiptModal = ({
             .total-row span:last-child { text-align: right; white-space: nowrap; }
             .total-row.grand { font-size: ${styles.totalFont}; font-weight: bold; border-top: 1px solid #000; padding-top: 6px; margin-top: 6px; }
             .customer { font-size: ${styles.baseFont}; margin: 3px 0; }
-            .footer { text-align: center; margin-top: 16px; font-size: ${styles.baseFont}; color: #666; }
+            .footer { text-align: center; margin-top: 16px; font-size: ${styles.baseFont}; color: #000; }
             @media print {
               html, body { margin: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
               body { max-width: none; }
