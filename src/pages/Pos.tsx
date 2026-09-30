@@ -292,19 +292,41 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     } else {
       // Fall back to populating the search box so the user sees the code.
       setSearchQuery(trimmed);
-      toast({ variant: "destructive", title: "Barcode not found", description: trimmed });
+      toast({
+        variant: "destructive",
+        title: "Barcode not found",
+        description: isOnline
+          ? trimmed
+          : `${trimmed} — offline, so this may be a product added after the last sync.`,
+      });
     }
   }, { enabled: activeTab === "sale" });
 
-  // Auto-focus the search box so keyboard-wedge barcode scanners work on
-  // Android without the user tapping/typing first (scanner keystrokes only
-  // reach the page when an input field has focus).
+  // Keep focus on the scan box. Keyboard-wedge scanners only deliver
+  // keystrokes when an input has focus (Android routes them through the IME),
+  // and the POS has ten other fields that steal it — the moment focus lands
+  // in Amount received or Customer name, scanning used to go completely dead.
+  // Focus is never taken back from something being typed in or from a dialog.
   useEffect(() => {
     if (activeTab !== "sale") return;
-    const t = setTimeout(() => {
+    const ensureFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      const ae = document.activeElement as HTMLElement | null;
+      const tag = ae?.tagName;
+      const isEditable = tag === "INPUT" || tag === "TEXTAREA" || !!ae?.isContentEditable;
+      if (isEditable) return;
+      if (ae && ae.closest('[role="dialog"],[role="alertdialog"]')) return;
       searchInputRef.current?.focus();
-    }, 200);
-    return () => clearTimeout(t);
+    };
+    const timer = window.setInterval(ensureFocus, 2000);
+    window.addEventListener("focus", ensureFocus);
+    document.addEventListener("visibilitychange", ensureFocus);
+    ensureFocus();
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", ensureFocus);
+      document.removeEventListener("visibilitychange", ensureFocus);
+    };
   }, [activeTab, productsLoading]);
 
 
