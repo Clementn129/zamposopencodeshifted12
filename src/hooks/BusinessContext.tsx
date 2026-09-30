@@ -17,6 +17,7 @@ import {
   isOfflineTooLong,
   cacheBusiness,
   getCachedBusiness,
+  getCachedBusinessById,
 } from '@/lib/offlineStorage';
 import { useOnlineStatus } from './useOnlineStatus';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -167,9 +168,15 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     }, user?.id);
   }, [user?.id]);
 
-  const loadCachedBusiness = useCallback(async () => {
-    const cachedBiz = await getCachedBusiness(user?.id);
-    if (cachedBiz) {
+  const loadCachedBusiness = useCallback(async (businessId?: string): Promise<boolean> => {
+    const cachedBiz = businessId
+      ? await getCachedBusinessById(businessId)
+      : await getCachedBusiness(user?.id);
+    // A specific branch may only be restored if it was cached for this account
+    // (or predates per-account tagging), matching getCachedBusiness's rules.
+    const owned = !!cachedBiz && (!cachedBiz.cachedForUser || cachedBiz.cachedForUser === user?.id);
+    if (cachedBiz && owned) {
+      if (businessId) await cacheBusiness(cachedBiz, user?.id);
       const now = getAdjustedTime();
       const expiry = cachedBiz.subscriptionExpiresAt ? new Date(cachedBiz.subscriptionExpiresAt) : null;
       const isExpiredOffline = expiry ? now >= expiry : true;
@@ -194,10 +201,14 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         businessType: cachedBiz.businessType ?? null,
         preventNegativeStock: cachedBiz.preventNegativeStock !== false,
       });
-      return;
+      return true;
     }
+    // An explicit branch target must never fall through to the generic
+    // "Offline Mode" placeholder — that would silently swap the branch for a
+    // blank business with an empty id.
+    if (businessId) return false;
     const cached = getCachedSubscription();
-    if (!cached) return;
+    if (!cached) return false;
     const now = getAdjustedTime();
     const expiry = cached.expiresAt ? new Date(cached.expiresAt) : null;
     const isExpiredOffline = expiry ? now >= expiry : true;
@@ -214,6 +225,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       // No cached business row at all -> fail closed (match today's behaviour).
       preventNegativeStock: true,
     });
+    return true;
   }, [user?.id]);
 
   const updateSubscriptionStatusInDB = useCallback(
@@ -322,7 +334,11 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
 
       try {
         if (!isOnline) {
-          await loadCachedBusiness();
+          // Prefer the branch the caller asked for, then the most recently
+          // used cached business. Ignoring targetId here is what let a
+          // connectivity flap drop a branch owner back onto head office.
+          const restored = targetId ? await loadCachedBusiness(targetId) : false;
+          if (!restored) await loadCachedBusiness();
           return;
         }
 
@@ -395,13 +411,21 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       // Load the branch row in the background; don't flip global loading (would
       // unmount open dialogs). Keep showing current content until ready.
       setError(null);
-      await loadBusinessRow(businessId);
+      const row = await loadBusinessRow(businessId);
+      if (!row) {
+        // Offline or rejected: loadBusinessRow returns null without touching
+        // state, so restore the branch from the local cache. If that fails too,
+        // bail out — announcing a switch that never happened leaves listeners
+        // refetching for an id the UI is not actually on.
+        const restored = await loadCachedBusiness(businessId);
+        if (!restored) return;
+      }
       // Pass the target id in the payload so the listener refetches the NEW
       // branch — reading businessRef here would still hold the stale branch
       // (React hasn't committed the state update yet) and snap the UI back.
       window.dispatchEvent(new CustomEvent('zampos:business-changed', { detail: { businessId } }));
     },
-    [businesses, loadBusinessRow]
+    [businesses, loadBusinessRow, loadCachedBusiness]
   );
 
   const refreshGroup = useCallback(async () => {

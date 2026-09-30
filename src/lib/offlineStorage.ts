@@ -115,6 +115,8 @@ interface CachedBusiness {
   /** Absent on older caches -> must be read as `true` (block negatives). */
   preventNegativeStock?: boolean;
   cachedForUser?: string;
+  /** Absent on older caches -> tie-break falls back to store key order. */
+  lastUsedAt?: number;
 }
 
 let dbInstance: IDBDatabase | null = null;
@@ -394,6 +396,10 @@ export const markSaleAsSynced = async (saleId: string): Promise<void> => {
 
 // Products cache
 export const cacheProducts = async (products: OfflineProduct[]): Promise<void> => {
+  if (!Array.isArray(products)) {
+    console.error('[offline] cacheProducts: non-array payload, cache left untouched');
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['products'], 'readwrite');
@@ -706,10 +712,31 @@ export const cacheBusiness = async (business: CachedBusiness, userId?: string): 
     const request = store.put({
       ...business,
       cachedForUser: userId || undefined,
+      lastUsedAt: Date.now(),
     });
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+};
+
+export const getCachedBusinessById = async (businessId: string): Promise<CachedBusiness | null> => {
+  if (!businessId) return null;
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['business'], 'readonly');
+    const store = transaction.objectStore('business');
+    const request = store.get(businessId);
+    request.onsuccess = () => resolve((request.result as CachedBusiness | undefined) ?? null);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const mostRecentlyUsed = (entries: CachedBusiness[]): CachedBusiness => {
+  let best = entries[0];
+  for (const entry of entries) {
+    if ((entry.lastUsedAt ?? 0) > (best.lastUsedAt ?? 0)) best = entry;
+  }
+  return best;
 };
 
 export const getCachedBusiness = async (userId?: string): Promise<CachedBusiness | null> => {
@@ -726,9 +753,9 @@ export const getCachedBusiness = async (userId?: string): Promise<CachedBusiness
         return;
       }
       if (userId) {
-        const mine = results.find((entry) => entry.cachedForUser === userId);
-        if (mine) {
-          resolve(mine);
+        const mine = results.filter((entry) => entry.cachedForUser === userId);
+        if (mine.length > 0) {
+          resolve(mostRecentlyUsed(mine));
           return;
         }
         // Pre-per-account data has no tag. If there's exactly one untagged
@@ -743,8 +770,8 @@ export const getCachedBusiness = async (userId?: string): Promise<CachedBusiness
         resolve(null);
         return;
       }
-      // No specific user requested — return any cached business.
-      resolve(results[0]);
+      // No specific user requested — return the most recently used business.
+      resolve(mostRecentlyUsed(results));
     };
     request.onerror = () => reject(request.error);
   });
@@ -765,6 +792,10 @@ interface CachedDebtor {
 }
 
 export const cacheDebtors = async (debtors: CachedDebtor[]): Promise<void> => {
+  if (!Array.isArray(debtors)) {
+    console.error('[offline] cacheDebtors: non-array payload, cache left untouched');
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['debtors'], 'readwrite');
@@ -1030,6 +1061,10 @@ interface CachedExpense {
 }
 
 export const cacheExpenses = async (businessId: string, expenses: CachedExpense[]): Promise<void> => {
+  if (!Array.isArray(expenses)) {
+    console.error('[offline] cacheExpenses: non-array payload, cache left untouched');
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['expensesCache'], 'readwrite');
@@ -1077,6 +1112,10 @@ interface CachedDebtorPayment {
 }
 
 export const cacheDebtorPayments = async (businessId: string, payments: CachedDebtorPayment[]): Promise<void> => {
+  if (!Array.isArray(payments)) {
+    console.error('[offline] cacheDebtorPayments: non-array payload, cache left untouched');
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['debtorPaymentsCache'], 'readwrite');
@@ -1145,6 +1184,10 @@ interface CachedInvoice {
 }
 
 export const cacheInvoices = async (businessId: string, invoices: CachedInvoice[]): Promise<void> => {
+  if (!Array.isArray(invoices)) {
+    console.error('[offline] cacheInvoices: non-array payload, cache left untouched');
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['invoicesCache'], 'readwrite');
