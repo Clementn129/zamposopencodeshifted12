@@ -130,10 +130,19 @@ const MAX_RETRIES = 5;
 // Initialize IndexedDB with safe version handling
 export const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    // Return cached instance if available
-    if (dbInstance && dbInstance.objectStoreNames.length > 0) {
-      resolve(dbInstance);
-      return;
+    // Return cached instance if available and open
+    if (dbInstance) {
+      try {
+        if (dbInstance.objectStoreNames.length > 0 && (dbInstance as any).readyState !== 'closing') {
+          resolve(dbInstance);
+          return;
+        }
+      } catch {
+        dbInstance = null;
+      }
+      if ((dbInstance as any)?.readyState === 'closing') {
+        dbInstance = null;
+      }
     }
 
     tryCreate(DB_VERSION).then(resolve).catch((err) => {
@@ -169,16 +178,32 @@ const openExistingAndMigrate = async (): Promise<IDBDatabase> => {
       // If still failing, try opening without version upgrade
       const fallbackReq = indexedDB.open(DB_NAME);
       fallbackReq.onsuccess = () => {
-        dbInstance = fallbackReq.result;
-        resolve(fallbackReq.result);
+      dbInstance = fallbackReq.result;
+      const db = fallbackReq.result;
+      db.onversionchange = () => {
+        try { db.close(); } catch {}
+        dbInstance = null;
       };
-      fallbackReq.onerror = () => reject(fallbackReq.error);
+      db.onclose = () => {
+        if (dbInstance === db) dbInstance = null;
+      };
+      resolve(db);
     };
-    
-    request.onsuccess = () => {
-      dbInstance = request.result;
-      resolve(request.result);
+    fallbackReq.onerror = () => reject(fallbackReq.error);
+  };
+  
+  request.onsuccess = () => {
+    dbInstance = request.result;
+    const db = request.result;
+    db.onversionchange = () => {
+      try { db.close(); } catch {}
+      dbInstance = null;
     };
+    db.onclose = () => {
+      if (dbInstance === db) dbInstance = null;
+    };
+    resolve(db);
+  };
     
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -339,8 +364,23 @@ const tryCreate = (version: number): Promise<IDBDatabase> => {
 };
 
 // Get database instance
-const getDB = async (): Promise<IDBDatabase> => {
-  return await initDB();
+const getDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const attempt = async () => {
+      try {
+        const db = await initDB();
+        if ((db as any).readyState === 'closing') {
+          dbInstance = null;
+          setTimeout(() => attempt().then(resolve).catch(reject), 10);
+          return;
+        }
+        resolve(db);
+      } catch (e) {
+        reject(e as any);
+      }
+    };
+    attempt();
+  });
 };
 
 // Sales operations
