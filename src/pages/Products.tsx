@@ -30,6 +30,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import ConnectionStatus from "@/components/ConnectionStatus";
@@ -101,6 +111,11 @@ const Products = () => {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [exportCategory, setExportCategory] = useState<string>('all');
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [importSummary, setImportSummary] = useState<{ new: number; updated: number; skipped: Array<{ row: number; reason: string }>; barcodesRead: number; barcodesWritten: number; rowsRead: number } | null>(null);
+  const [pendingImport, setPendingImport] = useState<Array<{ action: 'insert' | 'update'; payload: any; id?: string; original: Record<string, string>; row: number }>>([]);
+  const [pendingSkipped, setPendingSkipped] = useState<Array<{ row: number; reason: string }>>([]);
 
   // Form state
   const [name, setName] = useState("");
@@ -556,7 +571,13 @@ const Products = () => {
   };
 
   const exportCsv = () => {
-    const rows = products.filter((p) => p.isActive);
+    const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const rows = products.filter((p) => {
+      if (!p.isActive) return false;
+      if (exportCategory === 'all') return true;
+      if (exportCategory === '__uncategorized__') return !p.category;
+      return p.category === exportCategory;
+    });
     const headers = [
       "name",
       "item_type",
@@ -595,7 +616,8 @@ const Products = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${label}-${new Date().toISOString().split("T")[0]}.csv`;
+    const catSlug = exportCategory === 'all' ? '' : exportCategory === '__uncategorized__' ? 'uncategorized' : slug(exportCategory);
+    a.download = catSlug ? `${label}-${catSlug}-${new Date().toISOString().split("T")[0]}.csv` : `${label}-${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
