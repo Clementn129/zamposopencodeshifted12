@@ -29,23 +29,69 @@ type Business = {
 };
 
 export const exportSalesToCsv = (sales: Sale[], filename: string = 'sales-export') => {
-  const headers = ['Date', 'Time', 'Sale ID', 'Items', 'Payment Method', 'Subtotal', 'Total', 'Synced'];
-  
-  const rows = sales.map(sale => {
+  const headers = [
+    'Date',
+    'Time',
+    'Sale ID',
+    'Product',
+    'Quantity',
+    'Unit Price',
+    'Line Total',
+    'Cost Price',
+    'COGS Line',
+    'Payment Method',
+    'Sale Subtotal',
+    'Sale Total',
+    'Synced'
+  ];
+
+  const rows: string[][] = [];
+  sales.forEach((sale) => {
     const d = new Date(sale.createdAt);
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-    const itemsStr = sale.items.map(i => `${i.quantity}x ${i.name}`).join('; ');
-    return [
-      date,
-      time,
-      sale.id,
-      itemsStr,
-      sale.paymentMethod === 'cash' ? 'Cash' : 'Mobile Money',
-      sale.subtotal.toFixed(2),
-      sale.total.toFixed(2),
-      sale.synced ? 'Yes' : 'No'
-    ];
+    const pm = sale.paymentMethod === 'cash' ? 'Cash' : 'Mobile Money';
+    const items = Array.isArray(sale.items) ? sale.items : [];
+    if (items.length === 0) {
+      rows.push([
+        date,
+        time,
+        sale.id,
+        '',
+        '0',
+        '0.00',
+        '0.00',
+        '0.00',
+        '0.00',
+        pm,
+        sale.subtotal.toFixed(2),
+        sale.total.toFixed(2),
+        sale.synced ? 'Yes' : 'No'
+      ]);
+      return;
+    }
+    items.forEach((i) => {
+      const qty = Number(i.quantity) || 0;
+      const price = Number(i.price) || 0;
+      const cost = Number(i.costPrice) || 0;
+      const lineTotal = price * qty;
+      const cogsLine = cost * qty;
+      rows.push([
+        date,
+        time,
+        sale.id,
+        i.name,
+        String(qty),
+        price.toFixed(2),
+        lineTotal.toFixed(2),
+        cost.toFixed(2),
+        cogsLine.toFixed(2),
+        pm,
+        sale.subtotal.toFixed(2),
+        sale.total.toFixed(2),
+        sale.synced ? 'Yes' : 'No'
+      ]);
+    });
   });
 
   downloadCsv(headers, rows, filename);
