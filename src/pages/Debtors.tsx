@@ -528,6 +528,9 @@ const Debtors = () => {
           businessId: business!.id,
           type: 'debtor_payment',
           payload: {
+            // Stable key so a replay after a partial failure cannot record the
+            // same payment (and its balance change) twice.
+            paymentId: crypto.randomUUID(),
             debtorId: selectedDebtor.id,
             amount,
             notes: paymentNotes.trim() || null,

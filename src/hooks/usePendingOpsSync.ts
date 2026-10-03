@@ -109,7 +109,10 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               const amountPaid = op.payload.amountPaid || 0;
               const { data: returnedSaleId, error: saleErr } = await (supabase.rpc as any)("sync_offline_sale", {
                 p_business_id: businessId,
-                p_offline_id: op.payload.offlineId || generateOfflineId(),
+                // Stable across retries. Falling back to generateOfflineId()
+                // here minted a new id each attempt, so a retry wrote a second
+                // sale; op.id is the durable queue key.
+                p_offline_id: op.payload.offlineId || op.id,
                 p_items: op.payload.items,
                 p_subtotal: op.payload.subtotal || op.payload.total || 0,
                 p_total: op.payload.total || 0,
@@ -131,6 +134,19 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
 
               if (saleErr) throw saleErr;
 
+              // Idempotent replay: the sale is keyed by offline_id, so a retry
+              // returns the same sale. If its debtor was already written, do not
+              // insert a second one.
+              const { data: existingDebtor } = await supabase
+                .from('debtors')
+                .select('id')
+                .eq('sale_id', returnedSaleId)
+                .maybeSingle();
+              if (existingDebtor) {
+                processed.push(op.id);
+                break;
+              }
+
               const { error: debtorErr } = await supabase.from('debtors').insert({
                 business_id: businessId,
                 sale_id: returnedSaleId,
@@ -149,12 +165,24 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'debtor_payment': {
-              const { error: payError } = await supabase.from('debtor_payments').insert({
+              const paymentId = op.payload.paymentId as string | undefined;
+              const paymentRow: { debtor_id: string; amount: number; notes: string | null; id?: string } = {
                 debtor_id: op.payload.debtorId,
                 amount: op.payload.amount,
                 notes: op.payload.notes || null,
-              });
-              if (payError) throw payError;
+              };
+              // Client-generated id makes the insert idempotent: replaying an
+              // already-recorded payment hits the primary key instead of writing
+              // a second row and double-counting the balance.
+              if (paymentId) paymentRow.id = paymentId;
+              const { error: payError } = await supabase.from('debtor_payments').insert(paymentRow);
+              if (payError) {
+                if (paymentId && /duplicate key/i.test(payError.message)) {
+                  processed.push(op.id);
+                  break;
+                }
+                throw payError;
+              }
 
               const { data: debtorRow } = await supabase
                 .from('debtors')
