@@ -1,13 +1,17 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getUnsyncedStockUpdates, markStockUpdateAsSynced } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+
+// Shared across every useStockSync instance for the same business so the two
+// mounts (AppSyncManager + the Products page) cannot read the same pending
+// stock deltas and apply them twice. Also guards re-entrant interval ticks.
+const stockSyncInFlight = new Map<string, boolean>();
 
 export function useStockSync(businessId: string | undefined, preventNegativeStock?: boolean) {
   const { isOnline } = useOnlineStatus();
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const syncInFlight = useRef(false);
 
   const checkPendingCount = useCallback(async () => {
     if (!businessId) {
@@ -24,9 +28,10 @@ export function useStockSync(businessId: string | undefined, preventNegativeStoc
   }, [businessId]);
 
   const sync = useCallback(async () => {
-    if (!businessId || !isOnline || syncInFlight.current) return;
+    if (!businessId || !isOnline) return;
+    if (stockSyncInFlight.get(businessId)) return;
 
-    syncInFlight.current = true;
+    stockSyncInFlight.set(businessId, true);
     setIsSyncing(true);
 
     let syncedCount = 0;
@@ -80,7 +85,7 @@ export function useStockSync(businessId: string | undefined, preventNegativeStoc
     } catch (e: any) {
       console.error("Error in stock sync process:", e);
     } finally {
-      syncInFlight.current = false;
+      stockSyncInFlight.set(businessId, false);
       setIsSyncing(false);
       await checkPendingCount();
       if (syncedCount > 0) {

@@ -1,10 +1,12 @@
 import { useEffect, useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { getPendingOps, removePendingOp, updatePendingOpRetry, cacheProducts, cacheDebtors, cacheInvoices, generateOfflineId, getPendingImageUpload, removePendingImageUpload, getPermanentlyFailedOps, resetFailedOps } from "@/lib/offlineStorage";
+import { getPendingOps, removePendingOp, updatePendingOpRetry, mergeServerProducts, mergeServerDebtors, mergeServerInvoices, generateOfflineId, getPendingImageUpload, removePendingImageUpload, getPermanentlyFailedOps, resetFailedOps } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
 // Maximum number of retries before marking an op as permanently failed
-const MAX_RETRIES = 5;
+// Keep in sync with offlineStorage.MAX_RETRIES: a transient outage must not
+// permanently strand a money/stock operation after only a few attempts.
+const MAX_RETRIES = 20;
 
 // Shared across hook instances so duplicate mounts (AppSyncManager + page-level
 // banners) never process the same ops concurrently.
@@ -21,8 +23,19 @@ const resolvePendingImageUrl = async (imageUrl: string | null | undefined, bId: 
     .from('product-images')
     .upload(path, upload.blob, { cacheControl: '3600', upsert: false });
   if (upErr) throw upErr;
-  await removePendingImageUpload(uploadId);
+  // NOTE: the pending blob is intentionally kept until the DB write succeeds.
+  // Removing it here would destroy the image if the following insert/update
+  // threw, losing it permanently on retry.
   return path;
+};
+
+const clearResolvedPendingImage = async (imageUrl: string | null | undefined): Promise<void> => {
+  if (!imageUrl || !imageUrl.startsWith('pending:')) return;
+  try {
+    await removePendingImageUpload(imageUrl.replace('pending:', ''));
+  } catch (e) {
+    console.error('Could not remove pending image upload:', e);
+  }
 };
 
 const isUuid = (v: string): boolean => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
@@ -67,12 +80,19 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
     }
   }, [businessId]);
 
-  const sync = useCallback(async () => {
+  const runSync = useCallback(async () => {
     if (!businessId || !isOnline || globalOpsSyncInFlight) return;
 
     globalOpsSyncInFlight = true;
     try {
-      const ops = await getPendingOps(businessId);
+      const ops = (await getPendingOps(businessId))
+        .slice()
+        .sort((a, b) => {
+          const ta = new Date(a.createdAt).getTime();
+          const tb = new Date(b.createdAt).getTime();
+          if (ta !== tb) return ta - tb;
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+        });
       if (ops.length === 0) return;
 
       const processed: string[] = [];
@@ -217,6 +237,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 }).select('id');
                 if (createErr) throw createErr;
                 newProductId = created?.[0]?.id;
+                await clearResolvedPendingImage(op.payload.image_url);
               }
 
               // If this product was created offline with a temp ID, any sales that synced
@@ -277,6 +298,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
               }).eq('id', op.payload.productId);
               if (updateErr) throw updateErr;
+              await clearResolvedPendingImage(op.payload.image_url);
               processed.push(op.id);
               break;
             }
@@ -289,15 +311,20 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'expense_create': {
-              const { error: expInsErr } = await supabase.from('expenses').insert({
+              const payload: Record<string, unknown> = {
                 business_id: businessId,
                 name: op.payload.name,
                 amount: op.payload.amount,
                 expense_date: op.payload.expense_date ?? op.payload.expenseDate,
                 notes: op.payload.notes || null,
                 category: op.payload.category || 'business',
-              });
-              if (expInsErr) throw expInsErr;
+              };
+              // Client-generated id on offline creates keeps the row id stable so
+              // an offline delete targets the same row after this op replays.
+              if (op.payload.id) payload.id = op.payload.id;
+              const { error: expInsErr } = await supabase.from('expenses').insert(payload as any);
+              // Replaying an already-inserted expense is not a failure.
+              if (expInsErr && !/duplicate key/i.test(expInsErr.message)) throw expInsErr;
               processed.push(op.id);
               break;
             }
@@ -342,20 +369,24 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'sale_delete': {
-              // Restore stock for each item in the sale
+              // Restore stock, aggregated per product so two lines of the same
+              // product aren't both applied from one stale read.
               const items: Array<{ productId: string; quantity: number }> = op.payload.items || [];
-              const productIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))];
+              const restoreByProduct = new Map<string, number>();
+              for (const item of items) {
+                if (!item?.productId) continue;
+                const qty = Number(item.quantity || 0);
+                if (qty === 0) continue;
+                restoreByProduct.set(item.productId, (restoreByProduct.get(item.productId) ?? 0) + qty);
+              }
+              const productIds = [...restoreByProduct.keys()];
               if (productIds.length > 0) {
                 const { data: products } = await supabase.from('products').select('id, stock').in('id', productIds);
                 if (products) {
-                  const updates = items
-                    .map((item: any) => {
-                      if (!item.productId) return null;
-                      const prod = products.find((p: any) => p.id === item.productId);
-                      if (!prod) return null;
-                      return supabase.from('products').update({ stock: Number(prod.stock) + (item.quantity || 0) }).eq('id', item.productId);
-                    })
-                    .filter(Boolean);
+                  const stockMap = new Map(products.map((p: any) => [p.id, Number(p.stock ?? 0)]));
+                  const updates = productIds
+                    .filter((id) => stockMap.has(id))
+                    .map((id) => supabase.from('products').update({ stock: (stockMap.get(id) ?? 0) + (restoreByProduct.get(id) ?? 0) }).eq('id', id));
                   await Promise.all(updates);
                 }
               }
@@ -372,18 +403,21 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 const { data: saleData } = await supabase.from('sales').select('items').eq('id', debtorData.sale_id).maybeSingle();
                 if (saleData?.items && Array.isArray(saleData.items)) {
                   const saleItems: Array<{ productId: string; quantity: number }> = saleData.items;
-                  const pIds = [...new Set(saleItems.map((i: any) => i.productId).filter(Boolean))];
+                  const restoreByProduct = new Map<string, number>();
+                  for (const item of saleItems) {
+                    if (!item?.productId) continue;
+                    const qty = Number(item.quantity || 0);
+                    if (qty === 0) continue;
+                    restoreByProduct.set(item.productId, (restoreByProduct.get(item.productId) ?? 0) + qty);
+                  }
+                  const pIds = [...restoreByProduct.keys()];
                   if (pIds.length > 0) {
                     const { data: prods } = await supabase.from('products').select('id, stock').in('id', pIds);
                     if (prods) {
-                      const updates = saleItems
-                        .map((item: any) => {
-                          if (!item.productId) return null;
-                          const prod = prods.find((p: any) => p.id === item.productId);
-                          if (!prod) return null;
-                          return supabase.from('products').update({ stock: Number(prod.stock) + (item.quantity || 0) }).eq('id', item.productId);
-                        })
-                        .filter(Boolean);
+                      const stockMap = new Map(prods.map((p: any) => [p.id, Number(p.stock ?? 0)]));
+                      const updates = pIds
+                        .filter((id) => stockMap.has(id))
+                        .map((id) => supabase.from('products').update({ stock: (stockMap.get(id) ?? 0) + (restoreByProduct.get(id) ?? 0) }).eq('id', id));
                       await Promise.all(updates);
                     }
                   }
@@ -514,6 +548,17 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               break;
             }
           }
+
+          // Success: remove the op immediately so a later failure, crash or
+          // tab close can never replay an operation that already applied.
+          // A failed removal must not be mistaken for a failed op (that would
+          // bump the retry count and could replay it later).
+          try {
+            await removePendingOp(op.id);
+          } catch (removeErr) {
+            console.error(`Could not remove synced op ${op.id}:`, removeErr);
+          }
+          processed.push(op.id);
         } catch (e) {
           const errorMsg = e instanceof Error ? e.message : String(e);
           const currentRetryCount = (op.retryCount || 0) + 1;
@@ -524,13 +569,14 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             console.error(`Failed to process pending op ${op.id} (${op.type}), retry ${currentRetryCount}/${MAX_RETRIES}:`, e);
           }
           
-          // Update retry count in IndexedDB
-          await updatePendingOpRetry(op.id, currentRetryCount, errorMsg);
+          // Update retry count in IndexedDB. Never let this throw out of the
+          // catch — otherwise the drain aborts and already-applied ops replay.
+          try {
+            await updatePendingOpRetry(op.id, currentRetryCount, errorMsg);
+          } catch (retryErr) {
+            console.error(`Could not record retry for ${op.id}:`, retryErr);
+          }
         }
-      }
-
-      for (const id of processed) {
-        await removePendingOp(id);
       }
 
       if (processed.length > 0) {
@@ -542,7 +588,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             .eq('business_id', businessId)
             .limit(25000);
           if (prodData) {
-            await cacheProducts(prodData.map((p: any) => ({
+            await mergeServerProducts(businessId, prodData.map((p: any) => ({
               id: p.id,
               businessId: p.business_id,
               name: p.name,
@@ -569,7 +615,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             .eq('business_id', businessId)
             .limit(1000);
           if (debtData) {
-            await cacheDebtors(debtData.map((d: any) => ({
+            await mergeServerDebtors(businessId, debtData.map((d: any) => ({
               id: d.id,
               businessId: d.business_id,
               customerName: d.customer_name,
@@ -589,7 +635,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             .eq('business_id', businessId)
             .limit(1000);
           if (invData) {
-            await cacheInvoices(invData.map((i: any) => ({
+            await mergeServerInvoices(businessId, invData.map((i: any) => ({
               id: i.id,
               businessId: i.business_id,
               invoiceNumber: i.invoice_number,
@@ -632,6 +678,29 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
       void refreshFailedOps();
     }
   }, [businessId, isOnline, refreshFailedOps, preventNegativeStock]);
+
+  // Cross-tab serialization: two windows on the same till must not drain the
+  // shared queue at the same time (that duplicates non-idempotent ops). Use
+  // the Web Locks API when available, falling back to the in-tab guard.
+  const sync = useCallback(async () => {
+    if (!businessId || !isOnline || globalOpsSyncInFlight) return;
+    const locks = typeof navigator !== 'undefined' ? (navigator as any).locks : undefined;
+    if (locks?.request) {
+      try {
+        await locks.request(
+          `zampos-op-sync:${businessId}`,
+          { ifAvailable: true },
+          async (lock: any) => {
+            if (lock) await runSync();
+          }
+        );
+        return;
+      } catch {
+        // Web Locks unavailable/failed — fall back to the in-tab guard.
+      }
+    }
+    await runSync();
+  }, [businessId, isOnline, runSync]);
 
   const retryFailedOps = useCallback(async (opIds: string[]) => {
     if (!businessId || opIds.length === 0) return;

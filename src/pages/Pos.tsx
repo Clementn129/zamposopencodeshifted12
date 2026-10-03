@@ -39,6 +39,7 @@ import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 
 type CartLine = { 
   lineId: string; 
+  businessId?: string;
   productId: string; 
   name: string; 
   price: number; 
@@ -169,10 +170,11 @@ const Pos = () => {
   }, [authLoading, user, navigate]);
 
   useEffect(() => {
-    getCart()
+    if (!business?.id) return;
+    getCart(business.id)
       .then((items) => setCart(items.map((i) => ({ ...i, lineId: i.lineId ?? computeLineId(i.productId, i.modifiers) }))))
       .catch(() => {});
-  }, []);
+  }, [business?.id]);
 
   useEffect(() => {
     const prev = visibleCountRef.current;
@@ -187,7 +189,8 @@ const Pos = () => {
   const subtotal = useMemo(() => cart.reduce((s, l) => {
     const lineTotal = l.price * l.quantity;
     if (l.discountType === 'percentage' && l.discountValue) {
-      return s + lineTotal * (1 - l.discountValue / 100);
+      const pct = Math.min(100, Math.max(0, l.discountValue));
+      return s + lineTotal * (1 - pct / 100);
     } else if (l.discountType === 'amount' && l.discountValue) {
       return s + Math.max(0, lineTotal - l.discountValue);
     }
@@ -198,9 +201,10 @@ const Pos = () => {
     if (!saleDiscountType || !saleDiscountValue) return 0;
     const value = Number(saleDiscountValue) || 0;
     if (saleDiscountType === 'percentage') {
-      return subtotal * (value / 100);
+      const pct = Math.min(100, Math.max(0, value));
+      return subtotal * (pct / 100);
     }
-    return Math.min(value, subtotal);
+    return Math.max(0, Math.min(value, subtotal));
   }, [subtotal, saleDiscountType, saleDiscountValue]);
 
   const total = subtotal - discountAmount;
@@ -231,10 +235,11 @@ const addProductToCart = async (p: Product, opts?: { modifiers?: CartLine['modif
     // keeps its price (including any override) when the quantity goes up.
     const next = existing
       ? cart.map((l) => (l.lineId === lineId ? { ...l, quantity: nextQty } : l))
-      : [...cart, { lineId, productId: p.id, name: displayName, price: unitPrice, quantity: 1, costPrice: p.costPrice, taxCategory: p.taxCategory, modifiers: opts?.modifiers ?? [], catalogPrice }];
+      : [...cart, { lineId, businessId: business?.id, productId: p.id, name: displayName, price: unitPrice, quantity: 1, costPrice: p.costPrice, taxCategory: p.taxCategory, modifiers: opts?.modifiers ?? [], catalogPrice }];
     setCart(next);
     await saveCartItem({
       lineId,
+      businessId: business?.id,
       productId: p.id,
       name: displayName,
       price: existing ? existing.price : unitPrice,
@@ -379,7 +384,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
 
   const clear = async () => { 
     setCart([]); 
-    await clearCart(); 
+    await clearCart(business?.id); 
     setSaleDiscountType(null);
     setSaleDiscountValue("");
     setPaymentMode("full");
@@ -451,6 +456,18 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         return;
       }
       amountPaidNow = p;
+    } else if (paymentMethod === "cash" && amountReceived.trim() !== "") {
+      // Cashier used the change calculator: never record a full-cash sale as
+      // paid in full when the tendered amount is short.
+      const received = Number(amountReceived) || 0;
+      if (received < total) {
+        toast({
+          variant: "destructive",
+          title: "Not enough cash",
+          description: `Received ZMW ${received.toFixed(2)} but the total is ZMW ${total.toFixed(2)}.`,
+        });
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -468,7 +485,8 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         const lineTotal = l.price * l.quantity;
         let discountedLine = lineTotal;
         if (l.discountType === 'percentage' && l.discountValue) {
-          discountedLine = lineTotal * (1 - l.discountValue / 100);
+          const pct = Math.min(100, Math.max(0, l.discountValue));
+          discountedLine = lineTotal * (1 - pct / 100);
         } else if (l.discountType === 'amount' && l.discountValue) {
           discountedLine = Math.max(0, lineTotal - l.discountValue);
         }
@@ -557,7 +575,9 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       }
 
       if (isCredit) {
-        if (isOnline && returnedSaleId && !pushFailed) {
+        const canInsertNow = isOnline && !!returnedSaleId && !pushFailed;
+        let debtorHandled = false;
+        if (canInsertNow) {
           const { error: debtorErr } = await supabase.from("debtors").insert({
             business_id: business.id,
             sale_id: returnedSaleId,
@@ -569,8 +589,15 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
             notes: creditNotes.trim() || null,
             due_date: dueDate || null,
           });
-          if (debtorErr) console.error("Failed to create debtor:", debtorErr);
-        } else {
+          if (debtorErr) {
+            // Never silently drop a credit sale's debtor — fall back to the
+            // offline queue so it retries (idempotent on the sale's offlineId).
+            console.error("Failed to create debtor — queueing for retry:", debtorErr);
+          } else {
+            debtorHandled = true;
+          }
+        }
+        if (!debtorHandled) {
           // Queue the debtor (and linked sale) so it is created exactly once when online.
           await queuePendingOp({
             id: generateOfflineId(),
@@ -672,6 +699,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
   ) => {
     const cartLines: CartLine[] = items.map(i => ({
       lineId: computeLineId(i.productId, (i as { modifiers?: Array<{ id: string }> }).modifiers ?? []),
+      businessId: business?.id,
       productId: i.productId,
       name: i.name,
       price: i.price,

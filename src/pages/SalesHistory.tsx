@@ -282,21 +282,17 @@ const SalesHistory = () => {
       // Clean up orphaned offline sales: if online and the server already has a
       // matching sale (same total, customer, payment method), mark it synced.
       if (isOnline && unsynced.length > 0 && onlineSalesFetched) {
+        // Match on the persisted offline_id — never on total/customer/method,
+        // which can collide and wrongly mark a different sale as synced.
         const { data: serverSales } = await supabase
           .from("sales")
-          .select("id, total, customer_name, payment_method")
+          .select("offline_id")
           .eq("business_id", business.id)
-          .limit(500);
-        if (serverSales) {
+          .in("offline_id", unsynced.map((u) => u.id));
+        if (serverSales && serverSales.length > 0) {
+          const syncedIds = new Set(serverSales.map((s: any) => s.offline_id).filter(Boolean));
           for (const u of unsynced) {
-            const match = serverSales.find((s) => {
-              const sTotal = Number(s.total);
-              const uTotal = Number(u.total);
-              return Math.abs(sTotal - uTotal) < 0.01 &&
-                (s.customer_name ?? null) === (u.customerName ?? null) &&
-                s.payment_method === u.paymentMethod;
-            });
-            if (match) {
+            if (syncedIds.has(u.id)) {
               await markSaleAsSynced(u.id);
             }
           }
@@ -617,8 +613,16 @@ const SalesHistory = () => {
         return;
       }
 
-      // Return stock to products (batched, avoids N+1)
-      const productIds = [...new Set(sale.items.map((i: any) => i.productId).filter(Boolean))];
+      // Return stock to products (aggregate per product so two lines of the
+      // same product aren't both applied from one stale stock read).
+      const restoreByProduct = new Map<string, number>();
+      for (const item of sale.items as any[]) {
+        if (!item?.productId) continue;
+        const qty = Number(item.quantity || 0);
+        if (qty === 0) continue;
+        restoreByProduct.set(item.productId, (restoreByProduct.get(item.productId) ?? 0) + qty);
+      }
+      const productIds = [...restoreByProduct.keys()];
       if (productIds.length > 0) {
         const { data: products } = await supabase
           .from("products")
@@ -626,10 +630,9 @@ const SalesHistory = () => {
           .in("id", productIds);
         if (products) {
           const stockMap = Object.fromEntries(products.map((p: any) => [p.id, Number(p.stock ?? 0)]));
-          const updates = sale.items.map((item: any) => item.productId && stockMap[item.productId] !== undefined
-            ? supabase.from("products").update({ stock: stockMap[item.productId] + (item.quantity || 0) }).eq("id", item.productId)
-            : null
-          ).filter(Boolean);
+          const updates = productIds
+            .filter((id) => stockMap[id] !== undefined)
+            .map((id) => supabase.from("products").update({ stock: stockMap[id] + (restoreByProduct.get(id) ?? 0) }).eq("id", id));
           await Promise.all(updates);
         }
       }
@@ -855,7 +858,7 @@ const SalesHistory = () => {
 
       </div>
       <div className="text-xs text-muted-foreground space-y-1">
-        {sale.items.map((item, idx) => {
+        {(Array.isArray(sale.items) ? sale.items : []).map((item, idx) => {
           const profit = calculateItemProfit(sale, item);
           const costPrice = Number(item.costPrice) || 0;
           const itemCost = costPrice * (Number(item.quantity) || 0);

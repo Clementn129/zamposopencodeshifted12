@@ -214,17 +214,20 @@ const ExpensesSection = ({ businessId, isOnline: isOnlineProp, onExpenseChanged 
       };
 
       if (!isOnline) {
-        const opId = generateOfflineId();
+        // Use a real UUID so the eventual server row keeps the same id. This
+        // lets an offline delete target the right row whether or not the
+        // create op has already replayed.
+        const expenseId = crypto.randomUUID();
         await queuePendingOp({
-          id: opId,
+          id: generateOfflineId(),
           businessId,
           type: 'expense_create',
-          payload: expenseData,
+          payload: { ...expenseData, id: expenseId },
           createdAt: new Date().toISOString(),
         });
         // Update local state + cache immediately
         const newExpense = {
-          id: opId,
+          id: expenseId,
           name: expenseData.name,
           amount: expenseData.amount,
           expenseDate: expenseData.expense_date,

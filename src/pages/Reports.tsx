@@ -129,11 +129,15 @@ const Reports = () => {
     const tax = active.reduce((sum, s) => sum + (Number(s.tax_amount) || 0), 0);
     const cogs = active.reduce((sum, s) => {
       const items = Array.isArray(s.items) ? s.items : [];
-      return sum + items.reduce((c: number, it: any) => c + (Number(it.costPrice) || 0) * (Number(it.quantity) || 0), 0);
+      return sum + items.reduce((c: number, it: any) => {
+        const unitCost = Number(it.costPrice ?? it.cost_price ?? it.cost ?? 0) || 0;
+        return c + unitCost * (Number(it.quantity) || 0);
+      }, 0);
     }, 0);
     const businessExp = expenses.filter((e) => e.category !== "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
     const drawings = expenses.filter((e) => e.category === "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
-    const grossProfit = revenue - cogs;
+    // Tax collected is owed onward, not profit — exclude it from gross profit.
+    const grossProfit = revenue - tax - cogs;
     const netProfit = grossProfit - businessExp;
     const outstanding = debtors.reduce((s, d) => s + Math.max(0, Number(d.amount_owed || 0) - Number(d.amount_paid || 0)), 0);
     const byPayment: Record<string, number> = {};

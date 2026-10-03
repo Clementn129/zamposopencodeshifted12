@@ -125,7 +125,9 @@ let dbInstance: IDBDatabase | null = null;
 const MAX_DB_RETRIES = 3;
 
 // Maximum retries for pending operation sync before marking permanently failed
-const MAX_RETRIES = 5;
+// Retries are cheap and a transient outage must not strand money/stock ops.
+// The manual "retry failed items" action still exists for genuinely rejected ops.
+const MAX_RETRIES = 20;
 
 // Initialize IndexedDB with safe version handling
 export const initDB = (): Promise<IDBDatabase> => {
@@ -611,6 +613,9 @@ export const isOfflineTooLong = (maxDays: number = 35): boolean => {
 // Cart operations
 interface CartItem {
   lineId: string;
+  /** Owning business. Cart is scoped per business so switching branch can
+   *  never surface (and sell) another branch's lines. */
+  businessId?: string;
   productId: string;
   name: string;
   price: number;
@@ -646,28 +651,50 @@ export const saveCartItem = async (item: CartItem): Promise<void> => {
   });
 };
 
-export const getCart = async (): Promise<CartItem[]> => {
+export const getCart = async (businessId?: string): Promise<CartItem[]> => {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['cartLines'], 'readonly');
     const store = transaction.objectStore('cartLines');
     const request = store.getAll();
     request.onsuccess = () => {
-      const items = request.result as CartItem[];
+      let items = request.result as CartItem[];
+      // Scope to a business when asked. Legacy lines with no businessId are
+      // dropped rather than risk selling them under the wrong branch.
+      if (businessId) items = items.filter((item) => item.businessId === businessId);
       resolve(items.map((item) => (item.lineId ? item : { ...item, lineId: computeLineId(item.productId, item.modifiers) })));
     };
     request.onerror = () => reject(request.error);
   });
 };
 
-export const clearCart = async (): Promise<void> => {
+export const clearCart = async (businessId?: string): Promise<void> => {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['cartLines'], 'readwrite');
     const store = transaction.objectStore('cartLines');
-    const request = store.clear();
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    if (!businessId) {
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      return;
+    }
+    const cursorReq = store.openKeyCursor();
+    cursorReq.onerror = () => reject(cursorReq.error);
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (cursor) {
+        const getReq = store.get(cursor.primaryKey);
+        getReq.onsuccess = () => {
+          const item = getReq.result as CartItem | undefined;
+          if (item?.businessId === businessId) store.delete(cursor.primaryKey);
+          cursor.continue();
+        };
+        getReq.onerror = () => reject(getReq.error);
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
@@ -856,6 +883,54 @@ export const cacheDebtors = async (debtors: CachedDebtor[]): Promise<void> => {
         });
       }
     };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+// Merge server debtors into the local cache WITHOUT dropping local state.
+// Offline placeholders for still-queued debtor ops must survive a refresh.
+export const mergeServerDebtors = async (businessId: string, serverDebtors: CachedDebtor[]): Promise<void> => {
+  if (!businessId) return;
+
+  const [local, pendingOps] = await Promise.all([
+    getCachedDebtors(businessId),
+    getPendingOps(businessId),
+  ]);
+
+  const localMap = new Map(local.map((d) => [d.id, d]));
+  const locked = new Set<string>();
+  for (const op of pendingOps) {
+    const p = op.payload as any;
+    if (op.type === 'debtor_create') {
+      if (p?.tempId) locked.add(p.tempId);
+      if (p?.offlineId) locked.add(p.offlineId);
+      if (p?.id) locked.add(p.id);
+    }
+    if (op.type === 'debtor_payment' || op.type === 'debtor_delete') {
+      const did = p?.debtorId ?? p?.id;
+      if (did) locked.add(did);
+    }
+  }
+
+  const serverIds = new Set(serverDebtors.map((d) => d.id));
+  const merged: CachedDebtor[] = serverDebtors.map((d) => {
+    const ld = localMap.get(d.id);
+    if (ld && locked.has(d.id)) {
+      return { ...d, amountOwed: ld.amountOwed, amountPaid: ld.amountPaid, status: ld.status };
+    }
+    return d;
+  });
+  // Never drop local rows the server pull didn't return.
+  for (const ld of local) {
+    if (!serverIds.has(ld.id)) merged.push(ld);
+  }
+
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['debtors'], 'readwrite');
+    const store = transaction.objectStore('debtors');
+    for (const d of merged) store.put(d);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -1246,6 +1321,49 @@ export const cacheInvoices = async (businessId: string, invoices: CachedInvoice[
         invoices.forEach((inv) => store.put(inv));
       }
     };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
+// Merge server invoices into the local cache WITHOUT dropping local state.
+// Offline placeholders for still-queued invoice ops must survive a refresh.
+export const mergeServerInvoices = async (businessId: string, serverInvoices: CachedInvoice[]): Promise<void> => {
+  if (!businessId) return;
+
+  const [local, pendingOps] = await Promise.all([
+    getCachedInvoices(businessId),
+    getPendingOps(businessId),
+  ]);
+
+  const localMap = new Map(local.map((i) => [i.id, i]));
+  const locked = new Set<string>();
+  for (const op of pendingOps) {
+    const p = op.payload as any;
+    if (op.type.startsWith('invoice_')) {
+      if (p?.id) locked.add(p.id);
+      if (p?.offlineId) locked.add(p.offlineId);
+    }
+  }
+
+  const serverIds = new Set(serverInvoices.map((i) => i.id));
+  const merged: CachedInvoice[] = serverInvoices.map((i) => {
+    const li = localMap.get(i.id);
+    if (li && locked.has(i.id)) {
+      return { ...i, status: li.status, total: li.total, updatedAt: li.updatedAt };
+    }
+    return i;
+  });
+  // Never drop local rows the server pull didn't return.
+  for (const li of local) {
+    if (!serverIds.has(li.id)) merged.push(li);
+  }
+
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['invoicesCache'], 'readwrite');
+    const store = transaction.objectStore('invoicesCache');
+    for (const i of merged) store.put(i);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });

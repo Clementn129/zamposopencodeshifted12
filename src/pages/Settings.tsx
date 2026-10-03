@@ -43,6 +43,9 @@ const Settings = () => {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Hydrate the form once per business id. A connectivity flap that refetches
+  // the same business must not wipe in-progress edits.
+  const hydratedBizIdRef = useRef<string | null>(null);
 
   // Tax config
   const [taxMode, setTaxMode] = useState<'none' | 'vat' | 'custom'>('none');
@@ -130,11 +133,19 @@ const Settings = () => {
 
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
-    if (!business?.id) return;
+    if (!business?.id || !isOnline) return;
     try {
-      await supabase.from('businesses').update({ business_type: value, updated_at: new Date().toISOString() }).eq('id', business.id);
-    } catch {
-      // non-critical — localStorage keeps working; server syncs next change
+      const { error } = await supabase.from('businesses').update({ business_type: value, updated_at: new Date().toISOString() }).eq('id', business.id);
+      if (error) throw error;
+    } catch (e) {
+      // Non-critical: localStorage keeps working, but surface the failure so it
+      // isn't silently lost.
+      console.error('Failed to save business type:', e);
+      toast({
+        variant: 'destructive',
+        title: 'Business type saved on this device only',
+        description: 'Could not reach the server — it will not sync to other devices yet.',
+      });
     }
   };
 
@@ -147,7 +158,8 @@ const Settings = () => {
   }, [authLoading, user, navigate]);
 
   useEffect(() => {
-    if (business) {
+    if (business && hydratedBizIdRef.current !== business.id) {
+      hydratedBizIdRef.current = business.id;
       setBusinessName(business.name || '');
       setTpin(business.tpin || '');
       setPhone(business.phone || '');

@@ -342,16 +342,32 @@ const Products = () => {
           if (idx >= 0) {
             cached[idx] = {
               ...cached[idx],
-              ...payload as any,
+              name: payload.name,
+              price: payload.price,
+              costPrice: payload.cost_price,
+              stock: payload.stock,
+              minimumStock: payload.minimum_stock,
+              category: payload.category,
+              taxCategory: payload.tax_category,
               imageUrl: imageUrl ?? undefined,
               imagePath: imagePath ?? undefined,
-            };
+              barcode: payload.barcode || null,
+              trackExpiry: payload.track_expiry,
+              expiryDate: payload.expiry_date,
+            } as any;
+          }
+          // Only send an absolute stock count when the user actually changed it.
+          // Otherwise a stale cached count would overwrite server stock that has
+          // since moved (e.g. a synced sale) when this op replays.
+          const queuePayload: Record<string, unknown> = { ...payload, productId: editing.id };
+          if (stockNum === editing.stock) {
+            delete queuePayload.stock;
           }
           await queuePendingOp({
             id: generateOfflineId(),
             businessId: business.id,
             type: 'product_update',
-            payload: { ...payload, productId: editing.id },
+            payload: queuePayload as any,
             createdAt: new Date().toISOString(),
           });
           toast({ title: "Updated (offline)" });

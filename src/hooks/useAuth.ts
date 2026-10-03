@@ -194,6 +194,12 @@ export const useAuth = () => {
         }
 
         // ---- session is null ----
+        // An explicit SIGNED_OUT must never resurrect a persisted offline
+        // login (sign-out clears it first; this is defence in depth against
+        // event-ordering races on flaky networks).
+        if (event === 'SIGNED_OUT') {
+          return;
+        }
         // Offline logins never create a Supabase session, so there is nothing
         // for refreshSession() to recover — restore the persisted record
         // instead of dumping the user back on the login screen.
@@ -493,7 +499,11 @@ export const useAuth = () => {
       // Clear first: the SIGNED_OUT event below must not resurrect the
       // persisted offline login for this device.
       clearOfflineSession();
-      setAuthState(prev => ({ ...prev, isPasswordRecovery: false }));
+      // Clear in-memory state immediately. If the network is down,
+      // supabase.auth.signOut() can fail or never emit SIGNED_OUT, and the
+      // previous user would otherwise stay logged in.
+      applySession(null);
+      setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown', isPasswordRecovery: false }));
       const { error } = await supabase.auth.signOut();
       return { error };
     } catch (e) {

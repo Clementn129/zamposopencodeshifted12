@@ -450,13 +450,19 @@ const Debtors = () => {
   };
 
   const handleRecordPayment = async () => {
-    if (!selectedDebtor || !paymentAmount) {
-      toast({ variant: 'destructive', title: 'Missing amount' });
+    if (!selectedDebtor) return;
+
+    const amount = Number(paymentAmount);
+    if (!paymentAmount || !Number.isFinite(amount) || amount <= 0) {
+      toast({ variant: 'destructive', title: 'Invalid amount', description: 'Enter a payment greater than 0.' });
       return;
     }
 
-    const amount = Number(paymentAmount);
-    const remaining = selectedDebtor.amountOwed - selectedDebtor.amountPaid;
+    const remaining = Math.max(0, selectedDebtor.amountOwed - selectedDebtor.amountPaid);
+    if (remaining <= 0) {
+      toast({ variant: 'destructive', title: 'Already settled', description: 'This debt is already fully paid.' });
+      return;
+    }
 
     if (amount > remaining) {
       toast({ variant: 'destructive', title: 'Amount exceeds balance', description: `Maximum: ZMW ${remaining.toFixed(2)}` });
@@ -486,7 +492,8 @@ const Debtors = () => {
 
         if (updateError) throw updateError;
 
-        // If this debtor has a linked sale, also update the sale's payment status
+        // If this debtor has a linked sale, record the payment atomically via
+        // the RPC (clamps to the sale balance and writes sale_payments + sales).
         const { data: debtorData } = await supabase
           .from('debtors')
           .select('sale_id')
@@ -495,30 +502,13 @@ const Debtors = () => {
 
         if (debtorData?.sale_id) {
           try {
-            const { data: saleRow } = await supabase
-              .from('sales')
-              .select('amount_paid, total')
-              .eq('id', debtorData.sale_id)
-              .maybeSingle();
-
-            if (saleRow) {
-              const currentPaid = Number(saleRow.amount_paid || 0);
-              const newSalePaid = Math.min(currentPaid + amount, Number(saleRow.total || 0));
-
-              await supabase.from('sale_payments').insert({
-                sale_id: debtorData.sale_id,
-                business_id: business!.id,
-                amount,
-                payment_method: 'cash',
-                notes: 'Payment via debtors',
-                recorded_by: user!.id,
-              });
-
-              await supabase
-                .from('sales')
-                .update({ amount_paid: newSalePaid })
-                .eq('id', debtorData.sale_id);
-            }
+            const { error: rpcErr } = await (supabase.rpc as any)("record_sale_payment", {
+              p_sale_id: debtorData.sale_id,
+              p_amount: amount,
+              p_payment_method: 'cash',
+              p_notes: 'Payment via debtors',
+            });
+            if (rpcErr) throw rpcErr;
           } catch (e: any) {
             console.error('Failed to update linked sale payment:', e);
           }
@@ -594,7 +584,16 @@ const Debtors = () => {
 
         if (saleData?.items && Array.isArray(saleData.items)) {
           const items = saleData.items as any[];
-          const productIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))];
+          // Aggregate per product first: two lines of the same product must not
+          // both be applied from the same stale stock read (lost update).
+          const restoreByProduct = new Map<string, number>();
+          for (const item of items) {
+            if (!item?.productId) continue;
+            const qty = Number(item.quantity || 0);
+            if (qty === 0) continue;
+            restoreByProduct.set(item.productId, (restoreByProduct.get(item.productId) ?? 0) + qty);
+          }
+          const productIds = [...restoreByProduct.keys()];
           if (productIds.length > 0) {
             const { data: products } = await supabase
               .from('products')
@@ -602,11 +601,9 @@ const Debtors = () => {
               .in('id', productIds);
             if (products) {
               const stockMap = Object.fromEntries(products.map((p: any) => [p.id, Number(p.stock ?? 0)]));
-              const updates = items
-                .map((item: any) => item.productId && stockMap[item.productId] !== undefined
-                  ? supabase.from('products').update({ stock: stockMap[item.productId] + (item.quantity || 0) }).eq('id', item.productId)
-                  : null
-                ).filter(Boolean);
+              const updates = productIds
+                .filter((id) => stockMap[id] !== undefined)
+                .map((id) => supabase.from('products').update({ stock: stockMap[id] + (restoreByProduct.get(id) ?? 0) }).eq('id', id));
               await Promise.all(updates);
             }
           }

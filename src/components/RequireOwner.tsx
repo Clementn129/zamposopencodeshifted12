@@ -9,12 +9,23 @@ interface Props {
 }
 
 /**
+ * Owner-class roles allowed through this guard. Managers are intentionally
+ * included (they run the shop); cashiers and kitchen staff are not.
+ */
+const OWNER_CLASS_ROLES = new Set(['owner', 'manager', 'super_admin']);
+
+/**
  * Wraps owner-only pages. Staff (cashiers, kitchen staff) are redirected to
  * their own screens. Owners, managers and super admins pass through.
+ *
+ * Fail-closed: an unresolved ("unknown") role is treated as NOT owner-class
+ * and redirected to the staff screen. Real authorization is still enforced
+ * server-side via RLS; this gate exists to avoid rendering owner UI to staff.
  */
 const RequireOwner = ({ children, staffRedirect }: Props) => {
   const { isLoading, user, role } = useAuthContext();
   const navigate = useNavigate();
+  const allowed = !!user && OWNER_CLASS_ROLES.has(role);
 
   useEffect(() => {
     if (isLoading) return;
@@ -22,17 +33,13 @@ const RequireOwner = ({ children, staffRedirect }: Props) => {
       navigate('/auth', { replace: true });
       return;
     }
-    if (role === 'cashier' || role === 'kitchen_staff') {
-      navigate(role === 'kitchen_staff' ? '/kitchen' : (staffRedirect ?? '/pos'), { replace: true });
+    if (!OWNER_CLASS_ROLES.has(role)) {
+      const dest = role === 'kitchen_staff' ? '/kitchen' : (staffRedirect ?? '/pos');
+      navigate(dest, { replace: true });
     }
   }, [isLoading, user, role, navigate, staffRedirect]);
 
-  // Never block on the loader. `isLoading` is bounded by a short timeout, and an
-// unknown role (server unreachable) must NOT leave the screen stuck on an
-// eternal "Loading…" — real authorization is enforced server-side via RLS, so
-// the gate here is UX only. With a signed-in user we render immediately;
-// offline logins keep their correct role via the cached-role fallback.
-  if (isLoading || !user || role === 'cashier' || role === 'kitchen_staff') {
+  if (isLoading || !allowed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-muted-foreground">Loading…</p>
