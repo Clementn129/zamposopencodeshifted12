@@ -376,6 +376,7 @@ const Products = () => {
           cached.push({
             id: tempId,
             businessId: business.id,
+            createdAt: new Date().toISOString(),
             name: payload.name,
             price: payload.price,
             costPrice: payload.cost_price,

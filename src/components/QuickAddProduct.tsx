@@ -135,6 +135,7 @@ const QuickAddProduct = ({
         {
           id: tempId,
           businessId,
+          createdAt: new Date().toISOString(),
           name: trimmed,
           price: priceNum,
           costPrice: null,

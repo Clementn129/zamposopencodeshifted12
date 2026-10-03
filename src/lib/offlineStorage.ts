@@ -67,6 +67,8 @@ interface OfflineStockUpdate {
 interface OfflineProduct {
   id: string;
   businessId: string;
+  /** Server created_at (or client time for offline creates). Keeps list order stable. */
+  createdAt?: string;
   name: string;
   price: number;
   costPrice: number | null;

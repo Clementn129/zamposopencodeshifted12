@@ -293,7 +293,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     if (match) {
       addToCart(match.id);
       setSearchQuery("");
-      searchInputRef.current?.focus();
+      searchInputRef.current?.focus({ preventScroll: true });
     } else {
       // Fall back to populating the search box so the user sees the code.
       setSearchQuery(trimmed);
@@ -321,7 +321,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       const isEditable = tag === "INPUT" || tag === "TEXTAREA" || !!ae?.isContentEditable;
       if (isEditable) return;
       if (ae && ae.closest('[role="dialog"],[role="alertdialog"]')) return;
-      searchInputRef.current?.focus();
+      searchInputRef.current?.focus({ preventScroll: true });
     };
     const timer = window.setInterval(ensureFocus, 2000);
     window.addEventListener("focus", ensureFocus);

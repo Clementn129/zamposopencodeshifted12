@@ -37,9 +37,10 @@ export function useDownstreamSync(businessId: string | undefined) {
         const [{ data: products }, { data: debtors }, { data: serverSales }] = await Promise.all([
           supabase
             .from("products")
-            .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, track_stock, expiry_date")
+            .select("id, business_id, created_at, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, track_stock, expiry_date")
             .eq("business_id", businessId)
             .order("created_at", { ascending: false })
+            .order("id", { ascending: true })
             .limit(25000),
           hasPendingDebtorWork
             ? Promise.resolve({ data: null })
@@ -61,6 +62,7 @@ export function useDownstreamSync(businessId: string | undefined) {
           const mapped = products.map((p: any) => ({
             id: p.id,
             businessId: p.business_id,
+            createdAt: p.created_at,
             name: p.name,
             price: Number(p.price),
             costPrice: p.cost_price != null ? Number(p.cost_price) : null,

@@ -61,6 +61,7 @@ const mapRowToProduct = (row: ProductRow): Product => ({
 const mapCachedProduct = (p: CachedProduct): Product => ({
   id: p.id,
   businessId: p.businessId,
+  createdAt: p.createdAt ?? undefined,
   name: p.name,
   price: Number(p.price ?? 0),
   costPrice: p.costPrice ?? null,
@@ -79,6 +80,27 @@ const mapCachedProduct = (p: CachedProduct): Product => ({
   parentId: (p as any).parentId ?? null,
   variantLabel: (p as any).variantLabel ?? null,
 });
+
+// One deterministic order for products no matter their source. Server rows come
+// back newest-first, but IndexedDB returns rows in id order, so without this the
+// list reshuffles every time the cache and the server swap in (on mount and on
+// every sync-complete refetch). Ties fall back to id so equal timestamps are
+// stable, and rows without a timestamp (legacy cache entries) sort last.
+const byNewestFirst = (a: Product, b: Product): number => {
+  const at = a.createdAt ? Date.parse(a.createdAt) : NaN;
+  const bt = b.createdAt ? Date.parse(b.createdAt) : NaN;
+  const aHas = !Number.isNaN(at);
+  const bHas = !Number.isNaN(bt);
+  if (aHas && bHas) {
+    if (at !== bt) return bt - at;
+  } else if (aHas !== bHas) {
+    return aHas ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
+
+const sortProductsNewestFirst = (list: Product[]): Product[] =>
+  list.slice().sort(byNewestFirst);
 
 // Resolve product-images storage paths to signed URLs in one round trip.
 // We use a 1-year expiry so URLs are effectively permanent for caching/CDN
@@ -237,6 +259,7 @@ export function useProducts(businessId: string | undefined) {
 
       const { data, error: fetchError, count } = await dbQuery
         .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
         .range(offset, offset + limit - 1);
 
       if (fetchError) throw fetchError;
@@ -264,7 +287,7 @@ export function useProducts(businessId: string | undefined) {
     const cached = await getCachedProducts(businessId);
     if (cached.length > 0) {
       const cachedMapped = cached.map(mapCachedProduct);
-      setProducts(cachedMapped);
+      setProducts(sortProductsNewestFirst(cachedMapped));
       setIsLoading(false);
     } else {
       setIsLoading(true);
@@ -285,7 +308,7 @@ export function useProducts(businessId: string | undefined) {
             const retryCached = await getCachedProducts(businessId);
             if (retryCached.length > 0) {
               const rcm = retryCached.map(mapCachedProduct);
-              setProducts(rcm);
+              setProducts(sortProductsNewestFirst(rcm));
             }
             setIsLoading(false);
           }
@@ -297,6 +320,7 @@ export function useProducts(businessId: string | undefined) {
           .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at")
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
           .limit(25000);
 
         if (fetchError) throw fetchError;
@@ -310,10 +334,10 @@ export function useProducts(businessId: string | undefined) {
         // already have a working URL.
         setProducts(prev => {
           const prevMap = new Map(prev.map(p => [p.id, p.imageUrl]));
-          return withUrls.map(p => ({
+          return sortProductsNewestFirst(withUrls.map(p => ({
             ...p,
             imageUrl: prevMap.get(p.id) ?? p.imageUrl,
-          }));
+          })));
         });
         setIsLoading(false);
 
@@ -323,6 +347,7 @@ export function useProducts(businessId: string | undefined) {
           withUrls.map((p) => ({
             id: p.id,
             businessId: p.businessId,
+            createdAt: p.createdAt,
             name: p.name,
             price: p.price,
             costPrice: p.costPrice,
@@ -347,7 +372,7 @@ export function useProducts(businessId: string | undefined) {
           const msg = e instanceof Error ? e.message : "Failed to load products";
           try {
             const retryCached = businessId ? await getCachedProducts(businessId) : [];
-            setProducts(retryCached.map(mapCachedProduct));
+            setProducts(sortProductsNewestFirst(retryCached.map(mapCachedProduct)));
             setError(retryCached.length ? null : msg);
           } catch {
             setError(msg);
@@ -359,7 +384,7 @@ export function useProducts(businessId: string | undefined) {
       // Offline: resolve cached blobs for images (no signed URLs available)
       const cachedMapped = cached.map(mapCachedProduct);
       resolveCachedBlobs(cachedMapped, blobUrlsRef).then(({ products: withBlobs, hasBlobs }) => {
-        if (hasBlobs) setProducts(withBlobs);
+        if (hasBlobs) setProducts(sortProductsNewestFirst(withBlobs));
       });
     } else {
       setError("No internet connection and no cached products");
