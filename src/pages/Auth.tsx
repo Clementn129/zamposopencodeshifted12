@@ -13,6 +13,36 @@ import { Store, Mail, Lock, User, Building2, Loader2, Phone, MapPin, ArrowLeft, 
 import { validateAffiliateCode } from '@/hooks/useAffiliate';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Supabase auth errors don't always carry a plain string on `.message` — the
+// client can surface an object (or nothing at all) when the request fails below
+// the auth layer, e.g. an SMTP send error. Rendering that directly gave users a
+// bare "Registration failed {}". Dig out a usable sentence instead.
+function describeAuthError(error: unknown, fallback: string): string {
+  if (!error) return fallback;
+  if (typeof error === 'string') return error.trim() || fallback;
+  if (error instanceof Error && error.message) return error.message;
+
+  if (typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+    for (const key of ['message', 'msg', 'error_description', 'error']) {
+      const v = e[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      // One level deeper: some clients nest the real reason under `error`.
+      if (v && typeof v === 'object') {
+        const nested = (v as Record<string, unknown>).message;
+        if (typeof nested === 'string' && nested.trim()) return nested.trim();
+      }
+    }
+  }
+  return fallback;
+}
+
+// Supabase reports email-throttling as a 429 / "rate limit" failure. Recognise it
+// so the user gets a real instruction instead of a generic failure.
+function isEmailRateLimit(error: unknown): boolean {
+  const msg = describeAuthError(error, '').toLowerCase();
+  return /rate limit|429|too many|security purposes|email address .* rate/.test(msg);
+}
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -39,6 +69,16 @@ const Auth = () => {
   const [loginPassword, setLoginPassword] = useState('');
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const [isResending, setIsResending] = useState(false);
+  // Resend is rate-limited by Supabase (2 emails/hour by default), so the button
+  // gets a cooldown and a rate-limit-specific message instead of failing with a
+  // generic error the user can't act on.
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendRateLimited, setResendRateLimited] = useState(false);
+  // Resend attempts are capped per email address per day. The email provider is on
+  // a free tier with a small monthly quota, so this stops one person burning it by
+  // hammering the button. Stored in localStorage so a refresh can't reset it.
+  const [resendCount, setResendCount] = useState(0);
+  const RESEND_DAILY_LIMIT = 3;
   
   // Register form
   const [registerEmail, setRegisterEmail] = useState('');
@@ -61,6 +101,30 @@ const Auth = () => {
       setAffiliateCode(refCode.toUpperCase());
     }
   }, [searchParams]);
+
+  // Tick down the resend cooldown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
+
+  // Load today's resend count for the pending unconfirmed email
+  useEffect(() => {
+    if (!unconfirmedEmail) return;
+    try {
+      const raw = localStorage.getItem(`zampos_resend_${unconfirmedEmail.toLowerCase()}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.date === new Date().toDateString() && typeof parsed.count === 'number') {
+        setResendCount(parsed.count);
+      }
+    } catch {
+      // Ignore malformed storage — treat as no attempts today.
+    }
+  }, [unconfirmedEmail]);
+
+  const dailyLimitReached = resendCount >= RESEND_DAILY_LIMIT;
 
   // Redirect if already logged in (but NOT during password recovery)
   useEffect(() => {
@@ -111,6 +175,8 @@ const Auth = () => {
         }
       } else {
         setUnconfirmedEmail(null);
+        setResendRateLimited(false);
+        setResendCooldown(0);
         toast({
           title: 'Welcome back!',
           description: 'You have successfully logged in.',
@@ -129,7 +195,7 @@ const Auth = () => {
 
   const handleResendConfirmation = async () => {
     const email = (unconfirmedEmail || loginEmail).trim();
-    if (!email) return;
+    if (!email || isResending || resendCooldown > 0 || dailyLimitReached) return;
     setIsResending(true);
     try {
       const { error } = await supabase.auth.resend({
@@ -137,17 +203,39 @@ const Auth = () => {
         email,
         options: { emailRedirectTo: `${getAppUrl()}/` },
       });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(describeAuthError(error, 'Email delivery failed.'));
       setUnconfirmedEmail(email);
+      setResendRateLimited(false);
+      setResendCooldown(60);
+      // Only a send that actually succeeded consumes the daily allowance.
+      setResendCount((c) => {
+        const next = c + 1;
+        try {
+          localStorage.setItem(
+            `zampos_resend_${email.toLowerCase()}`,
+            JSON.stringify({ date: new Date().toDateString(), count: next })
+          );
+        } catch {
+          // Storage full or blocked — the cap is a courtesy, not a security control.
+        }
+        return next;
+      });
       toast({
         title: 'Verification email sent',
         description: `We sent a new link to ${email}. Check your inbox and spam folder.`,
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      // Supabase reports email throttling as a 429 / "rate limit" error. Tell the
+      // user that plainly so they wait instead of hammering the button.
+      const isRateLimit = /rate limit|429|too many|security purposes/i.test(msg);
+      if (isRateLimit) setResendRateLimited(true);
       toast({
         variant: 'destructive',
-        title: 'Could not resend email',
-        description: err instanceof Error ? err.message : 'Please try again in a few minutes.',
+        title: isRateLimit ? 'Too many attempts' : 'Could not resend email',
+        description: isRateLimit
+          ? `We've hit the email limit for now. Wait about an hour, then try again — or contact support with ${email}.`
+          : (msg || 'Please try again in a few minutes.'),
       });
     } finally {
       setIsResending(false);
@@ -365,9 +453,18 @@ const Auth = () => {
       );
       
       if (error) {
-        let message = error.message;
-        if (error.message.includes('already registered')) {
+        let message = describeAuthError(
+          error,
+          'Something went wrong while creating your account. Please try again.'
+        );
+        if (/already registered|already exists/i.test(message)) {
           message = 'This email is already registered. Please login instead.';
+        }
+        // Signup can succeed but fail on the confirmation email. Say so plainly,
+        // otherwise the user retries and ends up with a duplicate-looking error.
+        if (/error sending confirmation email|unexpected_failure/i.test(message)) {
+          message =
+            'Your account was created, but the verification email could not be sent. Please contact support and we will activate it for you.';
         }
         toast({
           variant: 'destructive',
@@ -381,6 +478,10 @@ const Auth = () => {
         });
         setLoginEmail(registerEmail);
         setLoginPassword(registerPassword);
+        // Surfacing the email here makes the resend panel appear immediately after
+        // signup. Without this a user whose confirmation mail never arrives has no
+        // resend button until they attempt a login and hit "email not confirmed".
+        setUnconfirmedEmail(registerEmail.trim());
       } else {
         toast({
           title: 'Welcome to Sale Point!',
@@ -623,11 +724,28 @@ const Auth = () => {
                       variant="outline"
                       size="sm"
                       className="mt-2"
-                      disabled={isResending}
+                      disabled={isResending || resendCooldown > 0 || dailyLimitReached}
                       onClick={handleResendConfirmation}
                     >
-                      {isResending ? 'Sending…' : 'Resend verification email'}
+                      {dailyLimitReached
+                        ? "Try again tomorrow"
+                        : isResending
+                          ? 'Sending…'
+                          : resendCooldown > 0
+                            ? `Resend again in ${resendCooldown}s`
+                          : 'Resend verification email'}
                     </Button>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {dailyLimitReached
+                        ? `You've used all ${RESEND_DAILY_LIMIT} resend requests for today. Try again tomorrow, or contact support with this address and we'll activate your account for you.`
+                        : `${RESEND_DAILY_LIMIT - resendCount} resend request${RESEND_DAILY_LIMIT - resendCount === 1 ? '' : 's'} left today.`}
+                    </p>
+                    {resendRateLimited && !dailyLimitReached && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Still nothing? Email delivery is rate-limited. Contact support with this
+                        address and we&apos;ll activate your account for you.
+                      </p>
+                    )}
                   </div>
                 )}
                 
