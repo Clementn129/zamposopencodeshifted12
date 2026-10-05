@@ -16,7 +16,7 @@ import LowStockAlert from '@/components/LowStockAlert';
 import DashboardNotifications from '@/components/DashboardNotifications';
 import DashboardStats from '@/components/DashboardStats';
 
-import { Store, ShoppingCart, Package, CreditCard, LogOut, Copy, Receipt, Settings as SettingsIcon, Users, Wallet, Briefcase, BarChart3, FileClock, UserCheck, CalendarClock, ChefHat, LayoutGrid, Building2 } from 'lucide-react';
+import { Store, ShoppingCart, Package, CreditCard, LogOut, Copy, Receipt, Settings as SettingsIcon, Users, Wallet, Briefcase, BarChart3, FileClock, UserCheck, CalendarClock, ChefHat, LayoutGrid, Building2, HardHat } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -340,6 +340,17 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
             </Link>
+            {business?.capexEnabled && (
+              <Link to="/capex">
+                <Card className="product-card h-full">
+                  <CardContent className="flex flex-col items-center justify-center p-4 text-center">
+                    <HardHat className="w-6 h-6 text-primary mb-2" />
+                    <h3 className="font-medium text-sm">CAPEX</h3>
+                    <p className="text-xs text-muted-foreground">Capital purchases</p>
+                  </CardContent>
+                </Card>
+              </Link>
+            )}
             {isRestaurant && (
               <Link to="/kitchen">
                 <Card className="product-card h-full">

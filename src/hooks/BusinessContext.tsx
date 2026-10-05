@@ -47,6 +47,8 @@ export interface Business {
   businessType?: string | null;
   /** Opt-in flag. Absent/undefined must be treated as `true` (block negatives). */
   preventNegativeStock: boolean;
+  /** CAPEX register visibility. Absent/undefined must be treated as `false`. */
+  capexEnabled: boolean;
 }
 
 export interface BusinessGroupEntry {
@@ -97,6 +99,9 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
     : null,
   businessType: row.business_type ?? null,
   preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
+  // Strict `=== true`: an unmigrated database has no such column, and the
+  // feature must stay hidden rather than appear against a table that is not there.
+  capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
 });
 
 const isElectronBiz = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
@@ -165,6 +170,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       vatNumber: row.vat_number,
       businessType: row.business_type ?? null,
       preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
+      capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
     }, user?.id);
   }, [user?.id]);
 
@@ -200,6 +206,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         vatNumber: cachedBiz.vatNumber ?? null,
         businessType: cachedBiz.businessType ?? null,
         preventNegativeStock: cachedBiz.preventNegativeStock !== false,
+        capexEnabled: cachedBiz.capexEnabled === true,
       });
       return true;
     }
@@ -224,6 +231,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       vatRate: 16,
       // No cached business row at all -> fail closed (match today's behaviour).
       preventNegativeStock: true,
+      capexEnabled: false,
     });
     return true;
   }, [user?.id]);

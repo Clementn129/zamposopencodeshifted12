@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle } from "lucide-react";
+import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle, HardHat } from "lucide-react";
 import { format } from "date-fns";
 import { lusakaDayRange, lusakaWeekRange, lusakaMonthRange, lusakaDateLabel } from "@/lib/dateRange";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ConnectionStatus from "@/components/ConnectionStatus";
@@ -16,6 +17,7 @@ import { formatZMW } from "@/lib/currency";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { getCachedSalesHistory, getCachedExpenses, getCachedDebtors } from "@/lib/offlineStorage";
+import { CAPEX_CATEGORY_LABELS } from "@/lib/capex";
 
 type Period = "today" | "week" | "month";
 
@@ -34,6 +36,9 @@ const Reports = () => {
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [debtors, setDebtors] = useState<any[]>([]);
+  // CAPEX is fetched separately and never blocks the report: a missing `capex`
+  // table must not take revenue/profit down with it.
+  const [capex, setCapex] = useState<any[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
@@ -95,6 +100,27 @@ const Reports = () => {
       setSales(s ?? []);
       setExpenses(e ?? []);
       setDebtors(d ?? []);
+
+      // CAPEX only when the feature is on. Offline it simply stays empty rather
+      // than showing a stale figure for a period the user can no longer verify.
+      if (business.capexEnabled && isOnline) {
+        const { data: capexData, error: capexErr } = await supabase
+          .from("capex")
+          .select("id, amount, capex_category, purchase_date")
+          .eq("business_id", business.id)
+          .gte("purchase_date", lusakaDateLabel(range.from))
+          .lte("purchase_date", lusakaDateLabel(range.to))
+          .limit(1000);
+        if (capexErr) {
+          // Silent by design. The box just stays hidden.
+          console.warn("CAPEX unavailable:", capexErr.message);
+          setCapex([]);
+        } else {
+          setCapex(capexData ?? []);
+        }
+      } else {
+        setCapex([]);
+      }
     } catch (e: any) {
       console.error("Failed to fetch report data:", e);
       toast({ variant: "destructive", title: "Failed to load reports", description: e?.message ?? "Could not load data" });
@@ -156,6 +182,22 @@ const Reports = () => {
     return { revenue, tax, cogs, grossProfit, netProfit, businessExp, drawings, outstanding, count: active.length, byPayment, byCashier };
   }, [sales, expenses, debtors]);
 
+  // CAPEX is deliberately absent from every figure above. It is shown as its
+  // own box so a capital purchase never silently moves profit or cash.
+  const capexTotal = useMemo(
+    () => capex.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
+    [capex],
+  );
+
+  const capexByCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of capex) {
+      const key = r.capex_category || 'other';
+      map.set(key, (map.get(key) ?? 0) + (Number(r.amount) || 0));
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [capex]);
+
   // Price-override leakage: lines sold above or below their catalogue price.
   // Older sales carry no catalogPrice/finalSalePrice at all, so they are
   // skipped rather than treated as zero — the card hides until real data exists.
@@ -210,6 +252,14 @@ const Reports = () => {
     rows.push("");
     rows.push("Cashier,Sales,Revenue");
     Object.entries(stats.byCashier).forEach(([k, v]) => rows.push(`${k},${v.count},${v.revenue.toFixed(2)}`));
+
+    if (business.capexEnabled) {
+      rows.push("");
+      rows.push("CAPEX (excluded from profit)");
+      rows.push("Category,Total");
+      capexByCategory.forEach(([k, v]) => rows.push(`${CAPEX_CATEGORY_LABELS[k] ?? k},${v.toFixed(2)}`));
+      rows.push(`Total CAPEX,${capexTotal.toFixed(2)}`);
+    }
 
     const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -286,6 +336,40 @@ const Reports = () => {
                 <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Net Profit" value={formatZMW(stats.netProfit)} highlight />
                 <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Outstanding Debts" value={formatZMW(stats.outstanding)} />
               </div>
+
+              {/* CAPEX: its own box, deliberately outside every figure above. */}
+              {business?.capexEnabled && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <HardHat className="h-4 w-4" /> CAPEX
+                      <Badge variant="outline" className="text-[10px] font-normal">Not in profit</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between text-base">
+                      <span className="text-muted-foreground">Capital spend this period</span>
+                      <span className="font-semibold tabular-nums">{formatZMW(capexTotal)}</span>
+                    </div>
+                    {capexByCategory.length > 0 ? (
+                      <div className="space-y-1 border-t pt-2 text-sm">
+                        {capexByCategory.map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span>{CAPEX_CATEGORY_LABELS[key] ?? key}</span>
+                            <span className="tabular-nums">{formatZMW(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No CAPEX recorded in this period.</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Shown as a record only. Capital spend is not an operating expense and does not
+                      change gross or net profit.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-base">By Payment Method</CardTitle></CardHeader>

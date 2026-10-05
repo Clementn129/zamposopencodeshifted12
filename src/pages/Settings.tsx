@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,6 +67,8 @@ const Settings = () => {
   // Inventory guard: optimistically true (block negatives) until the row loads.
   const [preventNeg, setPreventNeg] = useState(true);
   const [preventNegSaving, setPreventNegSaving] = useState(false);
+  const [capexEnabled, setCapexEnabled] = useState(false);
+  const [capexSaving, setCapexSaving] = useState(false);
 
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
@@ -131,6 +133,48 @@ const Settings = () => {
     }
   };
 
+  const handleCapexEnabledChange = async (enabled: boolean) => {
+    if (!business?.id) return;
+    const previous = capexEnabled;
+    setCapexEnabled(enabled);
+    setCapexSaving(true);
+    const updates = {
+      capex_enabled: enabled,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Saved offline', description: 'The CAPEX setting will sync when connected.' });
+        return;
+      }
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+      toast({
+        title: enabled ? 'CAPEX turned on' : 'CAPEX turned off',
+        description: enabled
+          ? 'The CAPEX tab and its report box are now available.'
+          : 'The CAPEX tab is hidden. Recorded entries are kept.',
+      });
+      await refetch();
+    } catch (e) {
+      setCapexEnabled(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save this setting',
+      });
+    } finally {
+      setCapexSaving(false);
+    }
+  };
+
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
     if (!business?.id || !isOnline) return;
@@ -172,6 +216,7 @@ const Settings = () => {
       setCustomTaxName(business.customTaxName || '');
       setCustomTaxRate(business.customTaxRate != null ? String(business.customTaxRate) : '');
       setPreventNeg(business.preventNegativeStock !== false);
+      setCapexEnabled(business.capexEnabled === true);
     }
   }, [business]);
 
@@ -643,6 +688,38 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground">
                 On by default for every business. Turn it off only if you deliberately sell items
                 you have not received yet.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* CAPEX */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><HardHat className="h-5 w-5" /> CAPEX</CardTitle>
+              <CardDescription>
+                Keeps capital purchases — vans, machines, fittings — in their own register, separate
+                from your running expenses.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                <div>
+                  <Label htmlFor="capex-enabled">Show the CAPEX register</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {capexEnabled
+                      ? 'ON — a CAPEX tab and a CAPEX box in Reports.'
+                      : 'OFF — hidden. Anything already recorded is kept.'}
+                  </p>
+                </div>
+                <Switch
+                  id="capex-enabled"
+                  checked={capexEnabled}
+                  disabled={capexSaving}
+                  onCheckedChange={handleCapexEnabledChange}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                CAPEX is a record only. It never changes your revenue, cost of sales or profit.
               </p>
             </CardContent>
           </Card>

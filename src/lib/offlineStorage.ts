@@ -116,6 +116,8 @@ interface CachedBusiness {
   businessType?: string | null;
   /** Absent on older caches -> must be read as `true` (block negatives). */
   preventNegativeStock?: boolean;
+  /** Absent on older caches, and false on unmigrated databases -> CAPEX off. */
+  capexEnabled?: boolean;
   cachedForUser?: string;
   /** Absent on older caches -> tie-break falls back to store key order. */
   lastUsedAt?: number;
