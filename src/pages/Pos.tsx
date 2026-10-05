@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText } from "lucide-react";
+import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1005,6 +1005,9 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => navigate('/stock')}>
+                <Boxes className="h-4 w-4 mr-1" /> Stock
+              </Button>
               {role === 'cashier' ? (
                 <Button variant="destructive" size="sm" onClick={async () => { await signOut(); navigate('/auth'); }}>
                   <LogOut className="h-4 w-4 mr-1" /> Logout

@@ -34,6 +34,8 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Debtors = lazy(() => import("./pages/Debtors"));
 const Affiliate = lazy(() => import("./pages/Affiliate"));
 const AffiliateAuth = lazy(() => import("./pages/AffiliateAuth"));
+const Capex = lazy(() => import("./pages/Capex"));
+const StockRequests = lazy(() => import("./pages/StockRequests"));
 const Reports = lazy(() => import("./pages/Reports"));
 const CashierActivity = lazy(() => import("./pages/CashierActivity"));
 const AuditLog = lazy(() => import("./pages/AuditLog"));
@@ -99,9 +101,11 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
                     <Route path="/kitchen" element={<RequireKitchen><Kitchen /></RequireKitchen>} />
                     <Route path="/tables" element={<RequireMember restaurantOnly><DiningTabs /></RequireMember>} />
                     <Route path="/products" element={<RequireOwner><Products /></RequireOwner>} />
+  <Route path="/stock" element={<StockRequests />} />
                     <Route path="/subscription" element={<RequireOwner><Subscription /></RequireOwner>} />
                     <Route path="/sales" element={<RequireOwner><SalesHistory /></RequireOwner>} />
                     <Route path="/reports" element={<RequireOwner><Reports /></RequireOwner>} />
+        <Route path="/capex" element={<RequireOwner><Capex /></RequireOwner>} />
                     <Route path="/branches" element={<RequireOwner><GroupOverview /></RequireOwner>} />
                     <Route path="/cashier-activity" element={<RequireOwner><CashierActivity /></RequireOwner>} />
                     <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
