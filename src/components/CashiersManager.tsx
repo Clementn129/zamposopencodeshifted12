@@ -239,7 +239,16 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     // Optimistic so the switch feels instant, rolled back on failure.
     setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_adjust_stock: next } : x));
     try {
-      await callFn('set_stock_access', { cashier_id: c.id, can_adjust_stock: next });
+      // Owners already hold an UPDATE grant on business_cashiers via RLS, so
+      // write the column directly. Routing this through the edge function would
+      // make the toggle depend on that function being redeployed, which is not
+      // something a schema change can keep in step.
+      const { error } = await supabase
+        .from('business_cashiers')
+        .update({ can_adjust_stock: next })
+        .eq('id', c.id)
+        .eq('business_id', businessId);
+      if (error) throw error;
       await fetchCashiers();
       toast({
         title: next ? 'Stock access granted' : 'Stock access removed',
