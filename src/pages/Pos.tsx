@@ -349,6 +349,28 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     await saveCartItem(updated);
   };
 
+  // Lets the cashier type a quantity instead of tapping "+" repeatedly, which is
+  // unworkable for bulk lines (a merchant selling 500-unit lots would need 500
+  // taps). Whole numbers only — quantity is `integer` in products.stock and in
+  // every *items.quantity column, so a fractional value would silently truncate
+  // against stock and permanently drift inventory counts.
+  const updateItemQty = async (lineId: string, raw: string) => {
+    const existing = cart.find((l) => l.lineId === lineId);
+    if (!existing) return;
+    const trimmed = raw.trim();
+    // Blank/invalid input never lands in the cart — the last valid quantity stands,
+    // so a half-typed value can't zero out or corrupt the line.
+    if (trimmed === '') return;
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value <= 0) return;
+    // Snap to a whole unit. Guards against "2.5" reaching a column that can't hold it.
+    const whole = Math.floor(value);
+    if (whole === existing.quantity) return;
+    const updated = { ...existing, quantity: whole };
+    setCart(prev => prev.map((l) => (l.lineId === lineId ? updated : l)));
+    await saveCartItem(updated);
+  };
+
   const updateItemDiscount = async (lineId: string, type: 'percentage' | 'amount' | null, value: number) => {
     const existing = cart.find((l) => l.lineId === lineId);
     if (!existing) return;
@@ -1092,9 +1114,21 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                     {cart.length === 0 ? <p className="text-sm text-muted-foreground">{isService ? 'No services added.' : 'Cart empty.'}</p> : cart.map((l) => (
                       <div key={l.lineId} className="bg-secondary rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <div><p className="font-medium">{l.name}</p><p className="text-xs text-muted-foreground">{l.quantity} {labels.quantityLabel} × ZMW {l.price.toFixed(2)}</p></div>
+                          <div><p className="font-medium">{l.name}</p><p className="text-xs text-muted-foreground">{Number(l.quantity).toLocaleString()} {labels.quantityLabel} × ZMW {l.price.toFixed(2)}</p></div>
                           <div className="flex gap-1">
                             <Button variant="outline" size="icon" onClick={() => decQty(l.lineId)}><Minus className="h-4 w-4" /></Button>
+                            <Input
+                              key={`qty-${l.lineId}`}
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              step={1}
+                              defaultValue={l.quantity}
+                              onChange={(e) => updateItemQty(l.lineId, e.target.value)}
+                              onFocus={(e) => e.currentTarget.select()}
+                              className="w-16 h-8 text-xs text-center"
+                              aria-label={`Quantity for ${l.name}`}
+                            />
                             <Button variant="outline" size="icon" onClick={() => addToCart(l.productId, { modifiers: l.modifiers, unitPrice: l.price })}><Plus className="h-4 w-4" /></Button>
                             <Button variant="outline" size="icon" onClick={async () => { setCart(prev => prev.filter((x) => x.lineId !== l.lineId)); await removeCartItem(l.lineId); }}><Trash2 className="h-4 w-4" /></Button>
                           </div>

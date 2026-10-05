@@ -210,7 +210,9 @@ const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
+                      inputMode="numeric"
                       min="0"
+                      step={1}
                       value={item.quantity}
                       onChange={(e) => updateItemQuantity(idx, parseInt(e.target.value) || 0)}
                       className="w-16 h-8 text-center"
