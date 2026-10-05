@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, KeyRound, Power, Trash2, Users } from 'lucide-react';
+import { Loader2, Plus, KeyRound, Power, Trash2, Users, PackagePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 const NETWORK_ERROR_RE = /fetch|network|failed to connect|timeout|offline/i;
+
+// Postgres 42703 (direct SQL) / PGRST204 (PostgREST) both mean the column is
+// not there. Either way the migration has not been applied, so the list must
+// still load — this is the failure that first broke the cashier list.
+const MISSING_COLUMN_RE = /column .* does not exist|PGRST204|42703/i;
 
 interface Cashier {
   id: string;
@@ -21,6 +27,7 @@ interface Cashier {
   last_login_at: string | null;
   created_at: string;
   role: string;
+  can_adjust_stock: boolean;
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -51,6 +58,9 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
   const [newName, setNewName] = useState('');
   const [newPin, setNewPin] = useState('');
   const [newRole, setNewRole] = useState('cashier');
+  const [newStockAccess, setNewStockAccess] = useState(false);
+  // False until the migration lands. The toggles hide rather than lie.
+  const [stockAccessAvailable, setStockAccessAvailable] = useState(true);
 
   // Reset PIN dialog
   const [resetTarget, setResetTarget] = useState<Cashier | null>(null);
@@ -65,11 +75,37 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       return;
     }
     setLoading(true);
+
+    const LEGACY_COLUMNS = 'id, username, display_name, is_active, last_login_at, created_at, role';
+    const RICH_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock`;
+
     const { data, error } = await supabase
       .from('business_cashiers')
-      .select('id, username, display_name, is_active, last_login_at, created_at, role')
+      .select(RICH_COLUMNS)
       .eq('business_id', businessId)
       .order('created_at', { ascending: true });
+
+    if (error && MISSING_COLUMN_RE.test(error.message)) {
+      // Un-migrated database. Load the legacy shape so the page still works;
+      // the stock toggle stays hidden rather than silently claiming OFF.
+      const { data: legacy, error: legacyErr } = await supabase
+        .from('business_cashiers')
+        .select(LEGACY_COLUMNS)
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: true });
+      if (legacyErr) {
+        console.warn('Cashiers fetch failed:', legacyErr.message);
+        setLoading(false);
+        return;
+      }
+      setStockAccessAvailable(false);
+      setCashiers(
+        ((legacy ?? []) as unknown as Cashier[]).map((c) => ({ ...c, can_adjust_stock: false })),
+      );
+      setLoading(false);
+      return;
+    }
+
     if (error) {
       // Network-class failures (flaky link, still mid-switch) are not a real
       // cashier problem — don't surface a scary toast for them.
@@ -79,7 +115,14 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
         toast({ variant: 'destructive', title: 'Failed to load cashiers', description: error.message });
       }
     } else {
-      setCashiers(data ?? []);
+      setStockAccessAvailable(true);
+      setCashiers(
+        ((data ?? []) as unknown as Cashier[]).map((c) => ({
+          ...c,
+          // Explicit `=== true`: an absent/null value must read as OFF.
+          can_adjust_stock: c.can_adjust_stock === true,
+        })),
+      );
     }
     setLoading(false);
   }, [businessId, isOnline, toast]);
@@ -135,10 +178,16 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     if (!requireOnline()) return;
     setBusy(true);
     try {
-      await callFn('create', { username, pin: newPin, display_name: newName.trim() || null, role: newRole });
+      await callFn('create', {
+        username,
+        pin: newPin,
+        display_name: newName.trim() || null,
+        role: newRole,
+        can_adjust_stock: stockAccessAvailable ? newStockAccess : false,
+      });
       toast({ title: 'Staff added', description: `${username} can now sign in with their PIN.` });
       setCreateOpen(false);
-      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier');
+      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier'); setNewStockAccess(false);
       await fetchCashiers();
     } catch (e) {
       toast({ variant: 'destructive', title: 'Could not add cashier', description: e instanceof Error ? e.message : 'Unknown error' });
@@ -177,6 +226,29 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       await callFn('set_active', { cashier_id: c.id, is_active: !c.is_active });
       await fetchCashiers();
     } catch (e) {
+      toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggleStockAccess = async (c: Cashier) => {
+    if (!requireOnline()) return;
+    const next = !c.can_adjust_stock;
+    setBusy(true);
+    // Optimistic so the switch feels instant, rolled back on failure.
+    setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_adjust_stock: next } : x));
+    try {
+      await callFn('set_stock_access', { cashier_id: c.id, can_adjust_stock: next });
+      await fetchCashiers();
+      toast({
+        title: next ? 'Stock access granted' : 'Stock access removed',
+        description: next
+          ? `${c.display_name || c.username} can now request stock adjustments.`
+          : `${c.display_name || c.username} can no longer adjust stock.`,
+      });
+    } catch (e) {
+      setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_adjust_stock: c.can_adjust_stock } : x));
       toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
     } finally {
       setBusy(false);
@@ -240,6 +312,20 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
+                  {stockAccessAvailable && (
+                    <div className="flex items-center gap-2 mr-2">
+                      <Switch
+                        id={`stock-access-${c.id}`}
+                        checked={c.can_adjust_stock}
+                        disabled={busy}
+                        onCheckedChange={() => handleToggleStockAccess(c)}
+                        aria-label={`Allow stock adjustments for ${c.username}`}
+                      />
+                      <Label htmlFor={`stock-access-${c.id}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                        <PackagePlus className="h-3.5 w-3.5 inline mr-1" />Stock access
+                      </Label>
+                    </div>
+                  )}
                   <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setResetTarget(c); setResetPin(''); }}>
                     <KeyRound className="h-4 w-4 mr-1" /> Reset PIN
                   </Button>
@@ -298,6 +384,21 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                 </SelectContent>
               </Select>
             </div>
+            {stockAccessAvailable && (
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-secondary p-3">
+                <Label htmlFor="c-stock-access" className="cursor-pointer">
+                  <span className="font-medium">Allow stock adjustments</span>
+                  <span className="block text-xs text-muted-foreground">
+                    They can submit stock add/remove requests for you to approve.
+                  </span>
+                </Label>
+                <Switch
+                  id="c-stock-access"
+                  checked={newStockAccess}
+                  onCheckedChange={setNewStockAccess}
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setCreateOpen(false)} disabled={busy}>Cancel</Button>

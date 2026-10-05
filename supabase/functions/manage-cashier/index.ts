@@ -48,6 +48,10 @@ function validateRole(r: unknown): string {
   return "cashier";
 }
 
+// Postgres 42703 / PostgREST PGRST204 both mean the column is absent, i.e. the
+// CAPEX + cashier-stock-access migration has not been applied.
+const MISSING_COLUMN_RE = /column .* does not exist|PGRST204|42703/i;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -138,6 +142,9 @@ Deno.serve(async (req) => {
       const pin = validatePin(body.pin);
       const displayName = typeof body.display_name === "string" ? body.display_name.trim() : null;
       const role = validateRole(body.role);
+      // Per-cashier stock access. Defaults to false so a caller that predates
+      // this flag can never accidentally grant it.
+      const canAdjustStock = body.can_adjust_stock === true;
       if (!username) return json({ error: "Username must be 2-20 letters/numbers/underscore" }, 400);
       if (!pin) return json({ error: "PIN must be 4-6 digits" }, 400);
 
@@ -172,22 +179,47 @@ Deno.serve(async (req) => {
       };
 
       // Insert business_cashiers row (cap trigger enforces hard limit too)
-      const { data: row, error: insErr } = await admin
+      const rowInsert: Record<string, unknown> = {
+        business_id: biz.id,
+        auth_user_id: created.user.id,
+        username,
+        display_name: displayName,
+        is_active: true,
+        role,
+      };
+      // Only send the column when granted. Writing it against an un-migrated
+      // table would fail the insert and orphan the auth user we just created.
+      if (canAdjustStock) rowInsert.can_adjust_stock = true;
+
+      let createdRow = null;
+      const { data: insertedRow, error: insErr } = await admin
         .from("business_cashiers")
-        .insert({
-          business_id: biz.id,
-          auth_user_id: created.user.id,
-          username,
-          display_name: displayName,
-          is_active: true,
-          role,
-        })
+        .insert(rowInsert)
         .select()
         .single();
+
       if (insErr) {
-        await cleanup();
-        return json({ error: insErr.message }, 500);
+        // The migration has not been applied yet. Create the cashier without
+        // the stock flag rather than failing the whole operation.
+        if (canAdjustStock && MISSING_COLUMN_RE.test(insErr.message)) {
+          const retry = await admin
+            .from("business_cashiers")
+            .insert({ ...rowInsert, can_adjust_stock: false })
+            .select()
+            .single();
+          if (retry.error) {
+            await cleanup();
+            return json({ error: retry.error.message }, 500);
+          }
+          createdRow = retry.data;
+        } else {
+          await cleanup();
+          return json({ error: insErr.message }, 500);
+        }
+      } else {
+        createdRow = insertedRow;
       }
+      const row = createdRow;
 
       // Assign cashier role (handle_new_user trigger created a business_owner role
       // by default — remove it and assign cashier instead).
@@ -248,6 +280,33 @@ Deno.serve(async (req) => {
         .update({ is_active: isActive })
         .eq("id", cashierId);
       if (uErr) {
+        return json({ error: uErr.message }, 409);
+      }
+      return json({ ok: true });
+    }
+
+
+    if (action === "set_stock_access") {
+      const cashierId = String(body.cashier_id ?? "");
+      const canAdjust = body.can_adjust_stock === true;
+      if (!cashierId) return json({ error: "Missing cashier_id" }, 400);
+
+      const { data: cashier } = await admin
+        .from("business_cashiers")
+        .select("id, business_id")
+        .eq("id", cashierId)
+        .maybeSingle();
+      if (!cashier || cashier.business_id !== biz.id) return json({ error: "Cashier not found" }, 404);
+
+      const { error: uErr } = await admin
+        .from("business_cashiers")
+        .update({ can_adjust_stock: canAdjust })
+        .eq("id", cashierId);
+      if (uErr) {
+        // Migration not applied — say so plainly instead of a generic failure.
+        if (MISSING_COLUMN_RE.test(uErr.message)) {
+          return json({ error: "Stock access needs its database migration first." }, 409);
+        }
         return json({ error: uErr.message }, 409);
       }
       return json({ ok: true });

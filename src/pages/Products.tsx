@@ -57,6 +57,7 @@ import { useProducts, Product } from "@/hooks/useProducts";
 import { useStockSync } from "@/hooks/useStockSync";
 import { useBusinessType } from "@/hooks/useBusinessType";
 import { useProductCategories } from "@/hooks/useProductCategories";
+import { useCashierPermissions } from "@/hooks/useCashierPermissions";
 import { supabase } from "@/integrations/supabase/client";
 import {
   saveOfflineStockUpdate,
@@ -77,8 +78,12 @@ const NO_CAT_VALUE = "__none__";
 const Products = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, isLoading: authLoading, role } = useAuthContext();
-  const isCashier = role === "cashier";
+const { user, isLoading: authLoading, role } = useAuthContext();
+const isCashier = role === "cashier";
+// Cashiers can only request stock changes, and only while the owner has their
+// stock-access switch on. Owners/managers keep the direct dialog.
+const { canAdjustStock } = useCashierPermissions();
+const canAdjustStockHere = !isCashier || canAdjustStock;
 
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } =
     useBusiness(user?.id);
@@ -466,6 +471,16 @@ const Products = () => {
   };
 
   const openStockAdjust = (p: Product) => {
+    // Defence in depth: the buttons are hidden, but the dialog must not open
+    // for a cashier whose stock access was switched off.
+    if (!canAdjustStockHere) {
+      toast({
+        variant: "destructive",
+        title: "Stock access is off",
+        description: "Ask the owner to turn on stock access for you.",
+      });
+      return;
+    }
     setSelectedProduct(p);
     setStockAdjustment("");
     setAdjustmentType("add");
@@ -489,6 +504,17 @@ const Products = () => {
     try {
       // Cashiers cannot edit stock directly — submit a request for owner approval.
       if (isCashier) {
+        // The RLS policy re-checks can_adjust_stock. If the owner revoked access
+        // while this screen was open, the insert is rejected — say so plainly
+        // rather than showing a raw permission error.
+        if (!canAdjustStock) {
+          toast({
+            variant: "destructive",
+            title: "Stock access is off",
+            description: "Ask the owner to turn on stock access for you.",
+          });
+          return;
+        }
         const { error } = await supabase.from("stock_adjustment_requests").insert({
           business_id: business.id,
           product_id: selectedProduct.parentId ?? selectedProduct.id,
@@ -1017,7 +1043,7 @@ const Products = () => {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
-                                {showRowStock && !hasVariants && (
+                                {showRowStock && !hasVariants && canAdjustStockHere && (
                                   <Button
                                     variant="outline"
                                     size="icon"
@@ -1069,7 +1095,7 @@ const Products = () => {
                                       >
                                         <Pencil className="h-4 w-4" />
                                       </Button>
-                                      {labels.showStock && (
+                                      {labels.showStock && canAdjustStockHere && (
                                         <Button
                                           variant="ghost"
                                           size="icon"
