@@ -202,9 +202,13 @@ Deno.serve(async (req) => {
         // The migration has not been applied yet. Create the cashier without
         // the stock flag rather than failing the whole operation.
         if (canAdjustStock && MISSING_COLUMN_RE.test(insErr.message)) {
+          // Must omit the column entirely, not set it false: the error was
+          // caused by the column not existing, so spreading it back in
+          // (even as false) would fail the same way.
+          const { can_adjust_stock: _omitted, ...legacyInsert } = rowInsert;
           const retry = await admin
             .from("business_cashiers")
-            .insert({ ...rowInsert, can_adjust_stock: false })
+            .insert(legacyInsert)
             .select()
             .single();
           if (retry.error) {
