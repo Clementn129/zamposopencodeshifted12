@@ -131,6 +131,7 @@ const PrivacyPolicy = () => {
         </div>
 
         <div className="mt-12 pt-6 border-t text-center text-xs text-muted-foreground">
+          <p>Product of MC Sale Point Solutions</p>
           <p>© {new Date().getFullYear()} Sale Point. Built for Zambian businesses.</p>
           <p className="mt-1">Questions? <a className="text-primary hover:underline" href="mailto:support@salepointpos.online">support@salepointpos.online</a></p>
         </div>

@@ -307,6 +307,7 @@ export default function SeoPage({ data }: { data: SeoPageData }) {
             <Link key={r.path} to={r.path} className="hover:text-primary">{r.label}</Link>
           ))}
         </div>
+        <p>Product of MC Sale Point Solutions</p>
         <p>© {new Date().getFullYear()} Sale Point. Built for Zambian businesses.</p>
       </footer>
     </div>

@@ -318,6 +318,7 @@ const Index = () => {
         <div className="mb-3">
           <Link to="/privacy-policy" className="hover:text-primary">Privacy Policy</Link>
         </div>
+        <p>Product of MC Sale Point Solutions</p>
         <p>© {new Date().getFullYear()} Sale Point. Built for Zambian businesses.</p>
       </footer>
 
