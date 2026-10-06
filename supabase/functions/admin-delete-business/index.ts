@@ -42,9 +42,17 @@ async function findAuthUserIdsByEmail(admin: any, email: string) {
 }
 
 async function deleteAuthUsers(admin: any, userIds: string[]) {
-  for (const userId of [...new Set(userIds.filter(Boolean))]) {
-    const { error } = await admin.auth.admin.deleteUser(userId);
-    if (error) throw new Error(`Failed to delete account ${userId}: ${error.message}`);
+  const uniqueIds = [...new Set(userIds.filter(Boolean))];
+  const results = await Promise.allSettled(
+    uniqueIds.map(id => admin.auth.admin.deleteUser(id))
+  );
+
+  const errors = results
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .map(e => e.reason instanceof Error ? e.message : "Unknown error");
+
+  if (errors.length > 0) {
+    throw new Error(`Failed to delete some accounts: ${errors.join(", ")}`);
   }
 }
 
