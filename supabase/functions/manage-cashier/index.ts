@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
   // Public action: cashier login (no auth required)
   if (action === "cashier_login") {
     const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
-    const username = validateUsername(body.username);
+    const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
     const pin = validatePin(body.pin);
     if (!code || !username || !pin) return json({ error: "Missing code, username or PIN" }, 400);
 
@@ -95,7 +95,8 @@ Deno.serve(async (req) => {
       .eq("business_id", bizRow.id)
       .eq("username", username)
       .maybeSingle();
-    if (!cashier || !cashier.is_active) return json({ error: "Cashier not found or disabled" }, 404);
+    if (!cashier) return json({ error: "Cashier account not found" }, 404);
+    if (!cashier.is_active) return json({ error: "Account is disabled. Please contact your owner." }, 403);
 
     // Stamp last_login_at so the owner's Cashier Activity view stays accurate.
     await admin
