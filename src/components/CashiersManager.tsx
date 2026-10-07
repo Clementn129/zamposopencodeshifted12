@@ -310,17 +310,19 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
             {cashiers.map(c => (
-              <li key={c.id} className="p-3 flex items-center gap-3 flex-wrap">
-                <div className="flex-1 min-w-[160px]">
-                  <p className="font-medium">{c.display_name || c.username}</p>
+              <li key={c.id} className="p-3 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{c.display_name || c.username}</p>
                   <p className="text-xs text-muted-foreground">
-                    @{c.username} · {c.is_active ? <span className="text-green-600">Active</span> : <span className="text-muted-foreground">Disabled</span>}
+                    @{c.username} {c.is_active ? <span className="text-green-600">Active</span> : <span className="text-muted-foreground">Disabled</span>}
                   </p>
                   <span className="inline-block mt-1 text-[11px] font-medium bg-primary/10 text-primary rounded-full px-2 py-0.5">
                     {ROLE_LABEL[c.role] ?? 'Cashier'}
                   </span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
+                  {stockAccessAvailable && (
+                    <div className="flex items-center gap-2 mr-2">
                   {stockAccessAvailable && (
                     <div className="flex items-center gap-2 mr-2">
                       <Switch
