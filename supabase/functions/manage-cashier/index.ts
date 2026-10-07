@@ -66,6 +66,15 @@ Deno.serve(async (req) => {
   }
   const action = String(body.action ?? "");
 
+  if (action === "debug_cashiers") {
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+    if (!code) return json({ error: "Missing code" }, 400);
+    const { data: bizRow } = await admin.from("businesses").select("id").eq("payment_code", code).maybeSingle();
+    if (!bizRow) return json({ error: "Invalid business code" }, 404);
+    const { data: cashiers } = await admin.from("business_cashiers").select("*").eq("business_id", bizRow.id);
+    return json({ business: bizRow, cashiers: cashiers ?? [] });
+  }
+
   // Public action: cashier login (no auth required)
   if (action === "cashier_login") {
     const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
