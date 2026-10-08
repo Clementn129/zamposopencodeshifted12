@@ -2,12 +2,11 @@
 // The browser only ever uses the PUBLIC key — the secret key stays on the
 // server, where extend-subscription verifies the payment.
 //
-// Going live: set VITE_LENCO_WIDGET_URL=https://pay.lenco.co/js/v1/inline.js
-// and swap the server's LENCO_BASE_URL / LENCO_SECRET_KEY (supabase secrets set).
-
+// VITE_* env vars override these live defaults (Vercel does not need them).
 const WIDGET_SRC =
-  import.meta.env.VITE_LENCO_WIDGET_URL || "https://pay.sandbox.lenco.co/js/v1/inline.js";
-const PUBLIC_KEY = import.meta.env.VITE_LENCO_PUBLIC_KEY;
+  import.meta.env.VITE_LENCO_WIDGET_URL || "https://pay.lenco.co/js/v1/inline.js";
+const PUBLIC_KEY =
+  import.meta.env.VITE_LENCO_PUBLIC_KEY || "pub-8f9faf30d5dec329d1212b9cda882b0328cb9dcc6fc96685";
 
 type LencoWindow = Window & {
   LencoPay?: {
@@ -36,6 +35,16 @@ const loadWidget = (): Promise<void> => {
   return widgetLoading;
 };
 
+/** Warm the widget script on page load so the popup can open synchronously
+ * inside the click's user-activation window (popup blockers reject late opens). */
+export const preloadLenco = (): void => {
+  if (document.readyState === "complete") {
+    loadWidget().catch(() => {});
+  } else {
+    window.addEventListener("load", () => loadWidget().catch(() => {}), { once: true });
+  }
+};
+
 export type CheckoutOptions = {
   reference: string;
   amount: number;
@@ -55,6 +64,7 @@ export const lenco = {
   /** Opens the Lenco payment popup. Resolves with the reference on success
    * (or when confirmation is pending — the server then verifies the status). */
   async openCheckout(opts: CheckoutOptions): Promise<CheckoutResult> {
+    if (!PUBLIC_KEY) throw new Error("Lenco public key is not configured");
     await loadWidget();
     const w = window as LencoWindow;
     if (!w.LencoPay) throw new Error("Lenco payment window is unavailable");

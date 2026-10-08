@@ -1,5 +1,4 @@
-﻿-- Stock movements ledger + trigger
-BEGIN;
+-- Stock movements ledger + trigger
 
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,17 +29,25 @@ COMMENT ON COLUMN public.stock_movements.quantity_after IS 'products.stock value
 
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS sm_owner_all ON public.stock_movements
-  FOR ALL TO authenticated
-  USING (EXISTS (SELECT 1 FROM businesses b WHERE b.id = business_id AND b.user_id = auth.uid()))
-  WITH CHECK (EXISTS (SELECT 1 FROM businesses b WHERE b.id = business_id AND b.user_id = auth.uid()));
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'stock_movements' AND policyname = 'sm_owner_all'
+  ) THEN
+    CREATE POLICY sm_owner_all ON public.stock_movements
+      FOR ALL TO authenticated
+      USING (EXISTS (SELECT 1 FROM businesses b WHERE b.id = business_id AND b.user_id = auth.uid()))
+      WITH CHECK (EXISTS (SELECT 1 FROM businesses b WHERE b.id = business_id AND b.user_id = auth.uid()));
+  END IF;
+END $$;
 
-CREATE POLICY IF NOT EXISTS sm_read_all_members ON public.stock_movements
-  FOR SELECT TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM business_members bm
-    JOIN user_roles ur ON ur.user_id = auth.uid() AND ur.business_id = bm.business_id
-    WHERE bm.business_id = stock_movements.business_id AND bm.user_id = auth.uid()
-  ));
-
-COMMIT;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'stock_movements' AND policyname = 'sm_read_all_members'
+  ) THEN
+    CREATE POLICY sm_read_all_members ON public.stock_movements
+      FOR SELECT TO authenticated
+      USING (public.is_business_member(business_id));
+  END IF;
+END $$;

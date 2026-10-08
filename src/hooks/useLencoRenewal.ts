@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { lenco } from "@/lib/lenco";
+import { lenco, preloadLenco } from "@/lib/lenco";
 import { supabase } from "@/integrations/supabase/client";
 
 type LencoRenewalArgs = {
@@ -21,6 +21,10 @@ type LencoRenewalArgs = {
 export function useLencoRenewal({ businessId, paymentCode, email, months, amountZmw, onRenewed }: LencoRenewalArgs) {
   const { toast } = useToast();
   const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    preloadLenco();
+  }, []);
 
   const payWithLenco = useCallback(async () => {
     if (!businessId || paying) return;

@@ -1,5 +1,4 @@
-﻿-- Trigger to capture stock changes
-BEGIN;
+-- Trigger to capture stock changes
 
 CREATE OR REPLACE FUNCTION public.log_stock_change()
 RETURNS trigger
@@ -46,5 +45,3 @@ DO $$ BEGIN
     WHEN (OLD.stock IS DISTINCT FROM NEW.stock)
     EXECUTE FUNCTION public.log_stock_change();
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-COMMIT;
