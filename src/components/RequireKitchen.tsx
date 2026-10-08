@@ -2,6 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useBusiness } from '@/hooks/useBusiness';
+import { useBusinessType } from '@/hooks/useBusinessType';
 
 interface Props {
   children: ReactNode;
@@ -16,9 +17,10 @@ interface Props {
 const RequireKitchen = ({ children }: Props) => {
   const { isLoading, user, role } = useAuthContext();
   const { business, isLoading: bizLoading } = useBusiness(user?.id);
+  const { isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const navigate = useNavigate();
 
-  const notRestaurant = !!business && business.businessType !== 'restaurant';
+  const notRestaurant = !!business && !isRestaurant;
 
   useEffect(() => {
     if (isLoading || bizLoading) return;
@@ -26,7 +28,7 @@ const RequireKitchen = ({ children }: Props) => {
       navigate('/auth', { replace: true });
       return;
     }
-    if (business && business.businessType && business.businessType !== 'restaurant') {
+    if (notRestaurant) {
       navigate('/dashboard', { replace: true });
       return;
     }
@@ -34,7 +36,7 @@ const RequireKitchen = ({ children }: Props) => {
       navigate('/pos', { replace: true });
       return;
     }
-  }, [isLoading, bizLoading, user, role, business, navigate]);
+  }, [isLoading, bizLoading, user, role, notRestaurant, navigate]);
 
   if (isLoading || bizLoading || !user || notRestaurant) {
     return (

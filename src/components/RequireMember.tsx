@@ -2,6 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useBusiness } from '@/hooks/useBusiness';
+import { useBusinessType } from '@/hooks/useBusinessType';
 
 interface Props {
   children: ReactNode;
@@ -17,9 +18,10 @@ interface Props {
 const RequireMember = ({ children, restaurantOnly = false }: Props) => {
   const { isLoading, user } = useAuthContext();
   const { business, isLoading: bizLoading } = useBusiness(user?.id);
+  const { isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const navigate = useNavigate();
 
-  const notRestaurant = restaurantOnly && !!business && business.businessType !== 'restaurant';
+  const notRestaurant = restaurantOnly && !!business && !isRestaurant;
 
   useEffect(() => {
     if (isLoading || bizLoading) return;

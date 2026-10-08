@@ -362,6 +362,17 @@ const Dashboard = () => {
                 </Card>
               </Link>
             )}
+            {isRestaurant && (
+              <Link to="/reports" state={{ view: "tickets" }}>
+                <Card className="product-card h-full">
+                  <CardContent className="flex flex-col items-center justify-center p-4 text-center">
+                    <Receipt className="w-6 h-6 text-muted-foreground mb-2" />
+                    <h3 className="font-medium text-sm">Ticket Reports</h3>
+                    <p className="text-xs text-muted-foreground">Today, week, month</p>
+                  </CardContent>
+                </Card>
+              </Link>
+            )}
             <Link to="/cashier-activity">
               <Card className="product-card h-full">
                 <CardContent className="flex flex-col items-center justify-center p-4 text-center">

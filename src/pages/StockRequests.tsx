@@ -41,7 +41,7 @@ const StockRequests = () => {
   const { toast } = useToast();
   const { business } = useBusiness();
   const { user, role } = useAuthContext();
-  const { canAdjustStock, loading: permLoading } = useCashierPermissions();
+  const { canAdjustStock } = useCashierPermissions();
 
   const [products, setProducts] = useState<ProductLite[]>([]);
   const [search, setSearch] = useState("");
@@ -148,7 +148,7 @@ const StockRequests = () => {
     }
   };
 
-  if (!permLoading && !canAdjustStock) {
+  if (!canAdjustStock) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <Card className="max-w-sm w-full text-center">
@@ -158,8 +158,8 @@ const StockRequests = () => {
             <p className="text-sm text-muted-foreground">
               Ask the owner to turn on &quot;Stock access&quot; for you in Settings, then try again.
             </p>
-            <Button variant="outline" className="w-full" onClick={() => navigate("/pos")}>
-              <ArrowLeft className="h-4 w-4 mr-1" /> Back to POS
+            <Button variant="outline" className="w-full" onClick={() => navigate(role === "kitchen_staff" ? "/kitchen" : "/pos")}>
+              <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
           </CardContent>
         </Card>

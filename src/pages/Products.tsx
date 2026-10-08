@@ -15,6 +15,9 @@ import {
   Download,
   Upload,
   Utensils,
+  LayoutGrid,
+  Boxes,
+  ChefHat,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -49,6 +52,9 @@ import InventoryDashboard from "@/components/InventoryDashboard";
 import ProductImageUpload from "@/components/ProductImageUpload";
 import VariantsManager from "@/components/VariantsManager";
 import MenuModifiersManager from "@/components/MenuModifiersManager";
+import DiningTablesManager from "@/components/DiningTablesManager";
+import IngredientsManager from "@/components/IngredientsManager";
+import DishRecipeDialog from "@/components/DishRecipeDialog";
 import { useAuthContext } from "@/contexts/AuthContext";
 import PendingStockRequests from "@/components/PendingStockRequests";
 
@@ -108,6 +114,9 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [open, setOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [modifiersOpen, setModifiersOpen] = useState(false);
+  const [diningTablesOpen, setDiningTablesOpen] = useState(false);
+  const [ingredientsOpen, setIngredientsOpen] = useState(false);
+  const [recipeProduct, setRecipeProduct] = useState<Product | null>(null);
   const [stockAdjustOpen, setStockAdjustOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState("");
@@ -918,6 +927,32 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                   <span className="hidden sm:inline">Modifiers</span>
                 </Button>
               )}
+              {isRestaurant && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDiningTablesOpen(true)}
+                  disabled={!isOnline}
+                  aria-label="Dining tables"
+                  title="Floor plan tables"
+                >
+                  <LayoutGrid className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Tables</span>
+                </Button>
+              )}
+              {isRestaurant && !isCashier && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIngredientsOpen(true)}
+                  disabled={!isOnline}
+                  aria-label="Ingredients"
+                  title="Ingredients and recipes"
+                >
+                  <Boxes className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Ingredients</span>
+                </Button>
+              )}
               <Button variant="pos" size="sm" onClick={openCreate} aria-label={labels.addButtonLabel}>
                 <Plus className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">{labels.addButtonLabel}</span>
@@ -1009,6 +1044,11 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                                         {rowIsService ? "Service" : "Product"}
                                       </Badge>
                                     )}
+                                    {p.isDish && !hasVariants && (
+                                      <Badge variant="secondary" className="text-[10px] flex items-center gap-0.5">
+                                        <ChefHat className="h-3 w-3" /> Dish
+                                      </Badge>
+                                    )}
                                     {hasVariants && (
                                       <Badge variant="outline" className="text-xs">
                                         {vars.length} variant{vars.length === 1 ? "" : "s"}
@@ -1043,6 +1083,17 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
+                                {isRestaurant && !isCashier && !hasVariants && (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => setRecipeProduct(p)}
+                                    aria-label="Recipe"
+                                    title="Recipe / dish costing"
+                                  >
+                                    <ChefHat className="h-4 w-4" />
+                                  </Button>
+                                )}
                                 {showRowStock && !hasVariants && canAdjustStockHere && (
                                   <Button
                                     variant="outline"
@@ -1495,6 +1546,49 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
           businessId={business?.id}
           products={products}
         />
+      )}
+
+      {/* Dining Tables Dialog (restaurant only) */}
+      {isRestaurant && (
+        <Dialog open={diningTablesOpen} onOpenChange={setDiningTablesOpen}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DiningTablesManager businessId={business?.id} />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Ingredients Dialog (restaurant only, owners/managers) */}
+      {isRestaurant && !isCashier && business?.id && (
+        <Dialog open={ingredientsOpen} onOpenChange={setIngredientsOpen}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Ingredients</DialogTitle>
+              <DialogDescription>
+                Track what your dishes are made of. Stock is deducted automatically on each sale.
+              </DialogDescription>
+            </DialogHeader>
+            <IngredientsManager businessId={business.id} />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Recipe / Dish costing Dialog (restaurant only, owners/managers) */}
+      {isRestaurant && !isCashier && business?.id && recipeProduct && (
+        <Dialog open={!!recipeProduct} onOpenChange={(o) => { if (!o) setRecipeProduct(null); }}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Recipe — {recipeProduct.name}</DialogTitle>
+              <DialogDescription>
+                Costing uses each ingredient's current unit cost. Selling this dish deducts its ingredients.
+              </DialogDescription>
+            </DialogHeader>
+            <DishRecipeDialog
+              businessId={business.id}
+              product={recipeProduct}
+              onSaved={refetch}
+            />
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Stock Adjustment Dialog */}

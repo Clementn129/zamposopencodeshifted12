@@ -21,6 +21,8 @@ export type Product = {
   barcode: string | null;
   isActive: boolean;
   itemType: ItemType;
+  /** true = recipe-based dish; stock comes from ingredients, cost from recipe. */
+  isDish: boolean;
   /** false = quick-added item whose stock is not counted yet. */
   trackStock: boolean;
   taxCategory: 'taxable' | 'zero_rated' | 'exempt';
@@ -46,6 +48,7 @@ const mapRowToProduct = (row: ProductRow): Product => ({
   barcode: (row as any).barcode ?? null,
   isActive: row.is_active,
   itemType: (((row as any).item_type ?? 'product') === 'service' ? 'service' : 'product'),
+  isDish: (row as any).is_dish === true,
   trackStock: row.track_stock !== false,
   taxCategory: (row.tax_category ?? 'taxable') as Product['taxCategory'],
   imageUrl: null,
@@ -73,6 +76,7 @@ const mapCachedProduct = (p: CachedProduct): Product => ({
   expiryDate: (p as any).expiryDate ?? null,
   isActive: p.isActive !== false,
   itemType: (((p as any).itemType ?? 'product') === 'service' ? 'service' : 'product'),
+  isDish: (p as any).isDish === true,
   trackStock: p.trackStock !== false,
   taxCategory: ((p as any).taxCategory ?? 'taxable') as Product['taxCategory'],
   imageUrl: (p as any).imageUrl ?? null,
@@ -248,7 +252,7 @@ export function useProducts(businessId: string | undefined) {
     try {
       let dbQuery = supabase
         .from("products")
-        .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at", { count: "exact" })
+        .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, created_at, updated_at", { count: "exact" })
         .eq("business_id", businessId)
         .eq("is_active", true);
 
@@ -317,7 +321,7 @@ export function useProducts(businessId: string | undefined) {
 
         const { data, error: fetchError } = await supabase
           .from("products")
-          .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, created_at, updated_at")
+          .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, created_at, updated_at")
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: true })
@@ -360,6 +364,7 @@ export function useProducts(businessId: string | undefined) {
             expiryDate: p.expiryDate,
             isActive: p.isActive,
             itemType: p.itemType,
+            isDish: p.isDish,
             taxCategory: p.taxCategory,
             imageUrl: p.imageUrl,
             imagePath: p.imagePath,

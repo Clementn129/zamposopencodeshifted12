@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes } from "lucide-react";
+import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes, ChefHat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -284,6 +284,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
   // — see useProducts). Query the server by barcode before crying wolf, and
   // never toast the same code twice in a row (scanners double-deliver).
   const lastScanMissRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
+  const lastDuplicateScanRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
 
   const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
 
@@ -325,9 +326,9 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     if (lastScanMissRef.current.code === lower && now - lastScanMissRef.current.at < 2000) return;
     lastScanMissRef.current = { code: lower, at: now };
 
-    // Fall back to populating the search box so the user sees the code while
-    // the server resolution below runs.
-    setSearchQuery(trimmed);
+    // The scan box is cleared by the scanner hook on every scan, so we never
+    // re-populate it here — the toast (and the cart) are the feedback. Leaving
+    // the code in the field made a second scan append to it.
 
     const toastNotFound = () =>
       toast({
@@ -414,11 +415,28 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     const trimmed = code.trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
+
+    // Several products can share one barcode (e.g. a stale/inactive row left on
+    // the same code). Prefer an in-stock match so the scan is predictable, and
+    // warn once so the shop can fix the duplicate data.
+    const byBarcode = activeProducts.filter((p) => p.barcode && p.barcode.toLowerCase() === lower);
     const match =
-      activeProducts.find((p) => p.barcode && p.barcode.toLowerCase() === lower) ||
+      byBarcode.find((p) => p.trackStock === false || (p.stock ?? 0) > 0) ||
+      byBarcode[0] ||
       activeProducts.find((p) => p.id.toLowerCase() === lower) ||
       activeProducts.find((p) => p.name.toLowerCase() === lower);
+
     if (match) {
+      if (byBarcode.length > 1) {
+        const now = Date.now();
+        if (lastDuplicateScanRef.current.code !== lower || now - lastDuplicateScanRef.current.at > 5000) {
+          lastDuplicateScanRef.current = { code: lower, at: now };
+          toast({
+            title: "Barcode is not unique",
+            description: `${byBarcode.length} products share ${trimmed} — add a distinct barcode in Products.`,
+          });
+        }
+      }
       addToCart(match.id);
       setSearchQuery("");
       searchInputRef.current?.focus({ preventScroll: true });
@@ -1115,7 +1133,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         <header className="bg-card border-b border-border px-4 py-4">
           <div className="max-w-4xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => navigate(role === 'cashier' ? '/auth' : '/dashboard')} aria-label="Back"><ArrowLeft className="h-5 w-5" /></Button>
+              <Button variant="ghost" size="icon" onClick={() => navigate(role === 'cashier' ? '/auth' : role === 'kitchen_staff' || role === 'manager' ? '/kitchen' : '/dashboard')} aria-label="Back"><ArrowLeft className="h-5 w-5" /></Button>
               <div>
                 <h1 className="font-display font-bold text-lg flex items-center gap-2"><ShoppingCart className="h-5 w-5" /> POS</h1>
                 <p className="text-xs text-muted-foreground">
@@ -1125,6 +1143,11 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {isRestaurant && (role === 'kitchen_staff' || role === 'manager') && (
+                <Button variant="outline" size="sm" onClick={() => navigate('/kitchen')}>
+                  <ChefHat className="h-4 w-4 mr-1" /> Kitchen
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => navigate('/stock')}>
                 <Boxes className="h-4 w-4 mr-1" /> Stock
               </Button>
@@ -1261,25 +1284,33 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                             {l.modifiers.map((m) => (m.priceAdjustment > 0 ? `${m.name} (+K${m.priceAdjustment.toFixed(2)})` : m.priceAdjustment < 0 ? `${m.name} (-K${Math.abs(m.priceAdjustment).toFixed(2)})` : m.name)).join(" · ")}
                           </p>
                         )}
-                        {/* Unit price override */}
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="text-xs text-muted-foreground w-20 shrink-0">Unit price</span>
-                          <Input
-                            key={`price-${l.lineId}`}
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            defaultValue={l.price}
-                            onChange={(e) => updateItemPrice(l.lineId, e.target.value)}
-                            className="w-24 h-8 text-xs"
-                            aria-label={`Unit price for ${l.name}`}
-                          />
-                          {l.catalogPrice != null && Math.abs(l.price - l.catalogPrice) > 0.001 && (
-                            <span className="text-xs text-muted-foreground">
-                              catalog ZMW {l.catalogPrice.toFixed(2)}
-                            </span>
-                          )}
-                        </div>
+                        {/* Unit price — editable only when the business enables
+                            "Allow editing price in cart" in Settings. */}
+                        {business?.allowCartPriceEdit ? (
+                          <div className="flex items-center gap-2 mt-2">
+                            <span className="text-xs text-muted-foreground w-20 shrink-0">Unit price</span>
+                            <Input
+                              key={`price-${l.lineId}`}
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              defaultValue={l.price}
+                              onChange={(e) => updateItemPrice(l.lineId, e.target.value)}
+                              className="w-24 h-8 text-xs"
+                              aria-label={`Unit price for ${l.name}`}
+                            />
+                            {l.catalogPrice != null && Math.abs(l.price - l.catalogPrice) > 0.001 && (
+                              <span className="text-xs text-muted-foreground">
+                                catalog ZMW {l.catalogPrice.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 mt-2">
+                            <span className="text-xs text-muted-foreground w-20 shrink-0">Unit price</span>
+                            <span className="text-xs tabular-nums">ZMW {l.price.toFixed(2)}</span>
+                          </div>
+                        )}
                         {/* Item discount */}
                         <div className="flex items-center gap-2 mt-2">
                           <Select 

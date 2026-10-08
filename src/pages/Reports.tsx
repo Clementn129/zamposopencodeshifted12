@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle, HardHat, Boxes, AlertTriangle, PackageX, Coins } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle, HardHat, Boxes, AlertTriangle, PackageX, Coins, ChefHat, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { lusakaDayRange, lusakaWeekRange, lusakaMonthRange, lusakaDateLabel } from "@/lib/dateRange";
+import { useBusinessType } from "@/hooks/useBusinessType";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,12 +52,16 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 
 const Reports = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const { isOnline } = useOnlineStatus();
   const { user, isLoading: authLoading } = useAuthContext();
   const { business, isLoading: bizLoading } = useBusiness(user?.id);
+  const { isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const [period, setPeriod] = useState<Period>("today");
-  const [reportView, setReportView] = useState<"sales" | "stock">("sales");
+  const [reportView, setReportView] = useState<"sales" | "stock" | "tickets">(
+    (location.state as { view?: string } | null)?.view === "tickets" ? "tickets" : "sales"
+  );
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [loading, setLoading] = useState(true);
@@ -68,6 +73,8 @@ const Reports = () => {
   const [capex, setCapex] = useState<any[]>([]);
   // Current stock snapshot for the Stock report (not period-bound).
   const [stock, setStock] = useState<StockRow[]>([]);
+  // Kitchen tickets for the selected period (restaurant businesses only).
+  const [tickets, setTickets] = useState<any[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
@@ -93,6 +100,7 @@ const Reports = () => {
         ]);
         const from = range.from.getTime();
         const to = range.to.getTime();
+        setTickets([]);
         setSales(cachedSales.filter(s => {
           const t = new Date(s.createdAt).getTime();
           return t >= from && t <= to;
@@ -157,6 +165,24 @@ const Reports = () => {
         active: r.is_active !== false,
         trackStock: r.track_stock !== false,
       })));
+
+      // Kitchen tickets (restaurant only). Filtered by created_at within range;
+      // the one-to-one sales embed gives the authoritative ticket value.
+      setTickets([]);
+      if (isRestaurant) {
+        const { data: t, error: tkErr } = await supabase
+          .from("kitchen_orders")
+          .select("id, status, created_at, served_at, cancelled_at, ticket_number, table_name, sales(total)")
+          .eq("business_id", business.id)
+          .gte("created_at", range.from.toISOString())
+          .lte("created_at", range.to.toISOString())
+          .limit(2000);
+        if (tkErr) {
+          console.warn("Kitchen tickets unavailable:", tkErr.message);
+        } else {
+          setTickets(t ?? []);
+        }
+      }
 
       // CAPEX only when the feature is on. Offline it simply stays empty rather
       // than showing a stale figure for a period the user can no longer verify.
@@ -314,6 +340,41 @@ const Reports = () => {
     };
   }, [stock]);
 
+  // Kitchen tickets: counts for the period (by created_at) plus the value of
+  // the linked sales. "Served"/"Cancelled" use their respective timestamps.
+  const ticketStats = useMemo(() => {
+    let created = 0;
+    let served = 0;
+    let cancelled = 0;
+    let open = 0;
+    let value = 0;
+    let servedValue = 0;
+    const recent: Array<{ ticket_number: number | null; created_at: string; served_at: string | null; cancelled_at: string | null; status: string; value: number; table_name: string | null }> = [];
+    for (const t of tickets) {
+      const tkt = t as any;
+      created += 1;
+      const status: string = tkt.status ?? "pending";
+      const numeric = (tkt.sales?.total ?? tkt.sales?.[0]?.total ?? 0);
+      const v = Number(numeric) || 0;
+      value += v;
+      if (tkt.served_at) served += 1;
+      if (status === "served" && tkt.served_at) servedValue += v;
+      if (tkt.cancelled_at) cancelled += 1;
+      if (status !== "served" && status !== "cancelled") open += 1;
+      recent.push({
+        ticket_number: tkt.ticket_number ?? null,
+        created_at: tkt.created_at ?? "",
+        served_at: tkt.served_at ?? null,
+        cancelled_at: tkt.cancelled_at ?? null,
+        status,
+        value: v,
+        table_name: tkt.table_name ?? null,
+      });
+    }
+    recent.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return { created, served, cancelled, open, value, servedValue, recent: recent.slice(0, 20) };
+  }, [tickets]);
+
   const exportCsv = () => {
     const rows: string[] = [];
     rows.push("Sale Point Report");
@@ -388,6 +449,41 @@ const Reports = () => {
     toast({ title: "Stock report exported" });
   };
 
+  const exportTicketsCsv = () => {
+    const rows: string[] = [];
+    rows.push("Kitchen Ticket Report");
+    rows.push(`Business,${business?.name ?? ""}`);
+    rows.push(`Period,${period}`);
+    rows.push(`From,${format(range.from, "yyyy-MM-dd HH:mm")}`);
+    rows.push(`To,${format(range.to, "yyyy-MM-dd HH:mm")}`);
+    rows.push("");
+    rows.push("Metric,Value");
+    rows.push(`Tickets created,${ticketStats.created}`);
+    rows.push(`Served,${ticketStats.served}`);
+    rows.push(`Cancelled,${ticketStats.cancelled}`);
+    rows.push(`Still open,${ticketStats.open}`);
+    rows.push(`Ticket value,${ticketStats.value.toFixed(2)}`);
+    rows.push(`Served value,${ticketStats.servedValue.toFixed(2)}`);
+    rows.push("");
+    rows.push("Ticket #,Status,Table,Created,Served,Cancelled,Value");
+    ticketStats.recent.forEach((r) => rows.push(
+      `${r.ticket_number ?? ""},${r.status},${r.table_name ?? ""},` +
+      `${r.created_at ? format(new Date(r.created_at), "yyyy-MM-dd HH:mm") : ""},` +
+      `${r.served_at ? format(new Date(r.served_at), "yyyy-MM-dd HH:mm") : ""},` +
+      `${r.cancelled_at ? format(new Date(r.cancelled_at), "yyyy-MM-dd HH:mm") : ""},` +
+      `${r.value.toFixed(2)}`
+    ));
+
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kitchen-tickets-${period}-${format(new Date(), "yyyyMMdd-HHmm")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Ticket report exported" });
+  };
+
   if (authLoading || bizLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   if (!business) return null;
 
@@ -401,18 +497,19 @@ const Reports = () => {
               <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")}><ArrowLeft className="w-5 h-5" /></Button>
               <div>
                 <h1 className="font-display font-bold text-lg">Reports</h1>
-                <p className="text-xs text-muted-foreground">Sales, profit & cash flow</p>
+                <p className="text-xs text-muted-foreground">Sales, profit, stock & kitchen tickets</p>
               </div>
             </div>
-            <Button size="sm" variant="outline" onClick={reportView === "stock" ? exportStockCsv : exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
+            <Button size="sm" variant="outline" onClick={reportView === "stock" ? exportStockCsv : reportView === "tickets" ? exportTicketsCsv : exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
           </div>
         </header>
 
         <main className="p-4 max-w-4xl mx-auto space-y-4">
-          <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock")}>
-            <TabsList className="grid grid-cols-2 w-full">
+          <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock" | "tickets")}>
+            <TabsList className={`grid w-full ${isRestaurant ? "grid-cols-3" : "grid-cols-2"}`}>
               <TabsTrigger value="sales">Sales & Profit</TabsTrigger>
               <TabsTrigger value="stock">Stock</TabsTrigger>
+              {isRestaurant && <TabsTrigger value="tickets">Tickets</TabsTrigger>}
             </TabsList>
           </Tabs>
 
@@ -601,6 +698,80 @@ const Reports = () => {
 
                 <p className="text-xs text-muted-foreground px-1">
                   Stock value reflects current on-hand quantities. Items without stock tracking are excluded.
+                </p>
+              </>
+            )
+          )}
+
+          {reportView === "tickets" && (
+            loading ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Loading...</p>
+            ) : !isOnline ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Kitchen ticket reports need a connection.</p>
+            ) : (
+              <>
+                <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)}>
+                  <TabsList className="grid grid-cols-3 w-full">
+                    <TabsTrigger value="today">Today</TabsTrigger>
+                    <TabsTrigger value="week">This Week</TabsTrigger>
+                    <TabsTrigger value="month">{MONTHS[selectedMonth]} {selectedYear}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {period === "month" && (
+                  <div className="flex gap-2">
+                    <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Month" /></SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((m, i) => (
+                          <SelectItem key={i} value={String(i)}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+                      <SelectTrigger className="w-28"><SelectValue placeholder="Year" /></SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 10 }, (_, i) => selectedYear - 5 + i).map((y) => (
+                          <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard icon={<ChefHat className="w-4 h-4" />} label="Tickets" value={ticketStats.created.toString()} />
+                  <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Served" value={ticketStats.served.toString()} />
+                  <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Cancelled" value={ticketStats.cancelled.toString()} />
+                  <StatCard icon={<Clock className="w-4 h-4" />} label="Still Open" value={ticketStats.open.toString()} />
+                  <StatCard icon={<Coins className="w-4 h-4" />} label="Ticket Value" value={formatZMW(ticketStats.value)} highlight />
+                  <StatCard icon={<ShoppingCart className="w-4 h-4" />} label="Served Value" value={formatZMW(ticketStats.servedValue)} />
+                </div>
+
+                <Card>
+                  <CardHeader className="pb-2"><CardTitle className="text-base">Latest Tickets</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {ticketStats.recent.length === 0 && <p className="text-muted-foreground">No kitchen tickets in this period.</p>}
+                    {ticketStats.recent.map((r) => (
+                      <div key={`${r.ticket_number}-${r.created_at}`} className="flex justify-between gap-2 border-b border-border/50 pb-1.5 last:border-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="truncate">
+                            #{r.ticket_number ?? "—"}{r.table_name ? ` · ${r.table_name}` : ""} · <span className="capitalize">{r.status}</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            Created {r.created_at ? format(new Date(r.created_at), "dd MMM yyyy, HH:mm") : "—"}
+                            {r.served_at ? ` · served ${format(new Date(r.served_at), "HH:mm")}` : ""}
+                            {r.cancelled_at ? ` · cancelled ${format(new Date(r.cancelled_at), "HH:mm")}` : ""}
+                          </p>
+                        </div>
+                        <span className="tabular-nums shrink-0">{formatZMW(r.value)}</span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                <p className="text-xs text-muted-foreground px-1">
+                  Counted by the ticket&apos;s creation date. Served/cancelled use their own timestamps; values come from the linked sale.
                 </p>
               </>
             )

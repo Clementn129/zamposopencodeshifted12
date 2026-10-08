@@ -51,6 +51,8 @@ export interface Business {
   preventNegativeStock: boolean;
   /** CAPEX register visibility. Absent/undefined must be treated as `false`. */
   capexEnabled: boolean;
+  /** Allow a cashier to override a line's unit price in the POS cart. Absent/undefined must be treated as `false`. */
+  allowCartPriceEdit: boolean;
 }
 
 export interface BusinessGroupEntry {
@@ -107,6 +109,8 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
   // Strict `=== true`: an unmigrated database has no such column, and the
   // feature must stay hidden rather than appear against a table that is not there.
   capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
+  // Strict `=== true`: cart price editing is opt-in and off by default.
+  allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
 });
 
 const isElectronBiz = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
@@ -182,6 +186,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       businessType: row.business_type ?? null,
       preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
       capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
+      allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
     }, user?.id);
   }, [user?.id]);
 
@@ -223,6 +228,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         businessType: cachedBiz.businessType ?? null,
         preventNegativeStock: cachedBiz.preventNegativeStock !== false,
         capexEnabled: cachedBiz.capexEnabled === true,
+        allowCartPriceEdit: cachedBiz.allowCartPriceEdit === true,
       });
       // A cached row is real, paintable business state: stop gating pages on
       // the network waterfall while fetchAll reconciles with the server.
@@ -256,6 +262,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       // No cached business row at all -> fail closed (match today's behaviour).
       preventNegativeStock: true,
       capexEnabled: false,
+      allowCartPriceEdit: false,
     });
     setIsLoading(false);
     clearLoadingTimer();

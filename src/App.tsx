@@ -100,7 +100,7 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
                       <Route path="/pos" element={<Pos />} />
                       <Route path="/kitchen" element={<RequireKitchen><Kitchen /></RequireKitchen>} />
                       <Route path="/tables" element={<RequireMember restaurantOnly><DiningTabs /></RequireMember>} />
-                      <Route path="/products" element={<RequireOwner><Products /></RequireOwner>} />
+                      <Route path="/products" element={<RequireOwner allowManager><Products /></RequireOwner>} />
                       <Route path="/stock" element={<StockRequests />} />
                       <Route path="/subscription" element={<RequireOwner><Subscription /></RequireOwner>} />
                       <Route path="/sales" element={<RequireOwner><SalesHistory /></RequireOwner>} />

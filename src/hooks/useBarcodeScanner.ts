@@ -168,30 +168,52 @@ export function useBarcodeScanner(
       return buffer;
     };
 
-    // A code only counts as a scan when the whole burst lands at machine
-    // speed. Without this bound an opted-in scan box fired mid-burst on its
-    // first few characters, so slow Bluetooth scanners flashed a "Barcode not
-    // found" for a truncated code before the full one had even arrived.
+    // A code only counts as a scan when the burst lands faster than a person
+    // types. The opted-in scan box gets a generous bound so slow Bluetooth
+    // scanners (and Android IME delivery) still register, while a human typing
+    // a search term — much slower per key — is never hijacked or wiped. Fields
+    // that never opted in keep the strict bound so ordinary typing there is
+    // safe. `lastTime - burstStart` is the typing span; it excludes the idle
+    // wait that ends a scanner burst lacking an Enter suffix.
     const shouldFire = (raw: string): boolean => {
       const len = raw.length;
-      if (len < 1) return false;
-      const total = Date.now() - burstStart;
-      return (
-        len >= Math.max(minLength, SCANNER_MIN_LENGTH) &&
-        total <= Math.max(SCANNER_MIN_TOTAL_MS, len * SCANNER_MS_PER_CHAR)
-      );
+      if (len < Math.max(minLength, SCANNER_MIN_LENGTH)) return false;
+      const sinceStart = Date.now() - burstStart;
+      if (scannerInput) {
+        const typed = lastTime > burstStart ? lastTime - burstStart : sinceStart;
+        return typed <= Math.max(500, len * 120);
+      }
+      return sinceStart <= Math.max(SCANNER_MIN_TOTAL_MS, len * SCANNER_MS_PER_CHAR);
+    };
+
+    // Budget scanners (and some Android IMEs) deliver the whole code twice in
+    // a single burst, so the field value reads `CODECODE`. Collapse an exact
+    // two-halves repeat back to one code. Two deliberate scans arrive as
+    // separate Enter/idle bursts, so genuine repeats still add quantity.
+    const collapseDoubled = (raw: string): string => {
+      const s = raw;
+      const n = s.length;
+      if (n >= 2 && n % 2 === 0) {
+        const half = n / 2;
+        if (s.slice(0, half) === s.slice(half)) return s.slice(0, half);
+      }
+      return s;
     };
 
     const doFire = (raw: string) => {
       clearIdle();
-      const code = raw.trim();
+      const code = collapseDoubled(raw).trim();
       const el = plainField;
       const value = restoreTo;
+      const box = scannerInput;
       startBurst(null);
       lastTime = 0;
-      // Restore before the callback — it may re-render, and the hijacked field
-      // must not keep the characters the scanner injected into it.
+      // Restore before the callback — it may re-render, and no field may keep
+      // the characters the scanner injected into it. The opted-in scan box is
+      // cleared too, so the next scan starts from an empty box instead of
+      // appending its code to the previous one.
       if (el && value !== null) restoreValue(el, value);
+      if (box) restoreValue(box, "");
       if (code) onScanRef.current(code);
     };
 

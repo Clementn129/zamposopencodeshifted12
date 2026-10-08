@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChefHat, LogOut, RotateCcw, Clock } from "lucide-react";
+import { ChefHat, LogOut, RotateCcw, Clock, ShoppingCart, Utensils, Boxes } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useProducts } from "@/hooks/useProducts";
@@ -146,13 +146,40 @@ const Kitchen = () => {
             >
               <RotateCcw className="h-4 w-4" />
             </button>
-            {role === 'owner' || role === 'manager' || role === 'super_admin' ? (
+            {role === 'owner' || role === 'super_admin' ? (
               <button
                 onClick={() => navigate('/dashboard')}
                 className="inline-flex items-center gap-1 h-9 rounded-lg border border-border px-3 text-sm hover:bg-secondary"
               >
                 Dashboard
               </button>
+            ) : role === 'manager' ? (
+              <>
+                <button
+                  onClick={() => navigate('/pos')}
+                  className="inline-flex items-center gap-1 h-9 rounded-lg border border-border px-3 text-sm hover:bg-secondary"
+                >
+                  <ShoppingCart className="h-4 w-4" /> Till
+                </button>
+                <button
+                  onClick={() => navigate('/products')}
+                  className="inline-flex items-center gap-1 h-9 rounded-lg border border-border px-3 text-sm hover:bg-secondary"
+                >
+                  <Utensils className="h-4 w-4" /> Menu
+                </button>
+                <button
+                  onClick={() => navigate('/stock')}
+                  className="inline-flex items-center gap-1 h-9 rounded-lg border border-border px-3 text-sm hover:bg-secondary"
+                >
+                  <Boxes className="h-4 w-4" /> Stock
+                </button>
+                <button
+                  onClick={async () => { await signOut(); navigate("/auth"); }}
+                  className="inline-flex items-center gap-1 h-9 rounded-lg border border-border px-3 text-sm hover:bg-secondary"
+                >
+                  <LogOut className="h-4 w-4" /> Logout
+                </button>
+              </>
             ) : (
               <button
                 onClick={async () => { await signOut(); navigate("/auth"); }}

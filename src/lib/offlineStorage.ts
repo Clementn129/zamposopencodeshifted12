@@ -122,6 +122,8 @@ interface CachedBusiness {
   preventNegativeStock?: boolean;
   /** Absent on older caches, and false on unmigrated databases -> CAPEX off. */
   capexEnabled?: boolean;
+  /** Allow overriding a line's unit price in the POS cart; absent = off. */
+  allowCartPriceEdit?: boolean;
   cachedForUser?: string;
   /** Absent on older caches -> tie-break falls back to store key order. */
   lastUsedAt?: number;

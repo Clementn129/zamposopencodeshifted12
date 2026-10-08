@@ -66,6 +66,9 @@ const Auth = () => {
   const [cashierUsername, setCashierUsername] = useState('');
   const [cashierPin, setCashierPin] = useState('');
   const [resetEmail, setResetEmail] = useState('');
+  // True from the moment a cashier-tab login succeeds until the backend role
+  // has resolved and we can send kitchen staff to the kitchen (not the till).
+  const [cashierLoginPending, setCashierLoginPending] = useState(false);
   
   // Password reset form
   const [newPassword, setNewPassword] = useState('');
@@ -170,6 +173,27 @@ const Auth = () => {
     else if (role === 'kitchen_staff' || role === 'manager') navigate('/kitchen');
     else navigate('/dashboard');
   }, [user, role, navigate, isPasswordRecovery]);
+
+  // Cashier-tab login completes before the backend role resolves, so we hold a
+  // "pending" flag and navigate once the real role is known — kitchen staff and
+  // managers go to the kitchen, not the till.
+  useEffect(() => {
+    if (!cashierLoginPending || role === 'unknown') return;
+    setCashierLoginPending(false);
+    if (role === 'cashier') navigate('/pos');
+    else if (role === 'kitchen_staff' || role === 'manager') navigate('/kitchen');
+    else navigate('/dashboard');
+  }, [cashierLoginPending, role, navigate]);
+
+  // If the role RPC never resolves, don't leave the user stuck on the auth page.
+  useEffect(() => {
+    if (!cashierLoginPending) return;
+    const t = window.setTimeout(() => {
+      setCashierLoginPending(false);
+      navigate('/pos', { replace: true });
+    }, 8000);
+    return () => window.clearTimeout(t);
+  }, [cashierLoginPending, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -321,7 +345,7 @@ const Auth = () => {
       }
 
       toast({ title: 'Signed in', description: 'Welcome.' });
-      navigate('/pos');
+      setCashierLoginPending(true);
     } catch (err) {
       const msg = String(err instanceof Error ? err.message : '').toLowerCase();
       const isNetworkError = /fetch|network|timeout|offline|failed to connect|load failed|networkerror/i.test(msg);
@@ -335,7 +359,7 @@ const Auth = () => {
           });
         } else {
           toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
-          navigate('/pos');
+          setCashierLoginPending(true);
         }
       } else {
         toast({

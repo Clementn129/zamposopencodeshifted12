@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -69,6 +69,8 @@ const Settings = () => {
   const [preventNegSaving, setPreventNegSaving] = useState(false);
   const [capexEnabled, setCapexEnabled] = useState(false);
   const [capexSaving, setCapexSaving] = useState(false);
+  const [allowCartPriceEdit, setAllowCartPriceEdit] = useState(false);
+  const [allowCartPriceEditSaving, setAllowCartPriceEditSaving] = useState(false);
 
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
@@ -175,12 +177,55 @@ const Settings = () => {
     }
   };
 
+  const handleAllowCartPriceEditChange = async (enabled: boolean) => {
+    if (!business?.id) return;
+    const previous = allowCartPriceEdit;
+    setAllowCartPriceEdit(enabled);
+    setAllowCartPriceEditSaving(true);
+    const updates = {
+      allow_cart_price_edit: enabled,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Saved offline', description: 'The cart price setting will sync when connected.' });
+        return;
+      }
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+      toast({
+        title: enabled ? 'Cart price editing on' : 'Cart price editing off',
+        description: enabled
+          ? 'Cashiers can change a line price in the POS cart.'
+          : 'The POS uses the catalogue price and hides the price box.',
+      });
+      await refetch();
+    } catch (e) {
+      setAllowCartPriceEdit(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save this setting',
+      });
+    } finally {
+      setAllowCartPriceEditSaving(false);
+    }
+  };
+
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
     if (!business?.id || !isOnline) return;
     try {
       const { error } = await supabase.from('businesses').update({ business_type: value, updated_at: new Date().toISOString() }).eq('id', business.id);
       if (error) throw error;
+      await refetch();
     } catch (e) {
       // Non-critical: localStorage keeps working, but surface the failure so it
       // isn't silently lost.
@@ -217,6 +262,7 @@ const Settings = () => {
       setCustomTaxRate(business.customTaxRate != null ? String(business.customTaxRate) : '');
       setPreventNeg(business.preventNegativeStock !== false);
       setCapexEnabled(business.capexEnabled === true);
+      setAllowCartPriceEdit(business.allowCartPriceEdit === true);
     }
   }, [business]);
 
@@ -688,6 +734,38 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground">
                 On by default for every business. Turn it off only if you deliberately sell items
                 you have not received yet.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Cart price editing */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Tag className="h-5 w-5" /> Cart price editing</CardTitle>
+              <CardDescription>
+                Lets a cashier change the unit price of an item after adding it to the POS cart.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                <div>
+                  <Label htmlFor="allow-cart-price-edit">Allow editing price in cart</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {allowCartPriceEdit
+                      ? 'ON — the POS shows an editable Unit price box on every cart line.'
+                      : 'OFF — the POS uses the catalogue price; the price box is read-only.'}
+                  </p>
+                </div>
+                <Switch
+                  id="allow-cart-price-edit"
+                  checked={allowCartPriceEdit}
+                  disabled={allowCartPriceEditSaving}
+                  onCheckedChange={handleAllowCartPriceEditChange}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Off by default. Leave it off unless staff routinely sell at a negotiated price —
+                an open price box lets anyone change what a customer is charged.
               </p>
             </CardContent>
           </Card>

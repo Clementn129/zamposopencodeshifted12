@@ -21,12 +21,13 @@ export const useCashierPermissions = () => {
   const isCashier = role === 'cashier';
 
   useEffect(() => {
-    if (!isCashier) {
-      // Owners/managers always retain access.
+    if (role === 'owner' || role === 'manager' || role === 'super_admin') {
+      // Owners/managers retain full access.
       setCanAdjustStock(true);
       return;
     }
-    if (!business?.id || !user) {
+    // Kitchen staff are not stock operators; they have no grant to read.
+    if (role !== 'cashier' || !business?.id || !user) {
       setCanAdjustStock(false);
       return;
     }

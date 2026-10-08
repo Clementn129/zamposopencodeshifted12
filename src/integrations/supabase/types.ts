@@ -295,6 +295,7 @@ export type Database = {
       businesses: {
         Row: {
           address: string | null
+          allow_cart_price_edit: boolean
           business_type: string
           created_at: string
           custom_tax_name: string | null
@@ -326,6 +327,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          allow_cart_price_edit?: boolean
           business_type?: string
           created_at?: string
           custom_tax_name?: string | null
@@ -357,6 +359,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          allow_cart_price_edit?: boolean
           business_type?: string
           created_at?: string
           custom_tax_name?: string | null
@@ -658,6 +661,165 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ingredient_stock_movements: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          business_id: string
+          created_at: string
+          delta: number
+          id: string
+          ingredient_id: string
+          movement_type: string
+          note: string | null
+          quantity_after: number
+          reference_id: string | null
+          reference_type: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          business_id: string
+          created_at?: string
+          delta: number
+          id?: string
+          ingredient_id: string
+          movement_type: string
+          note?: string | null
+          quantity_after: number
+          reference_id?: string | null
+          reference_type?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          business_id?: string
+          created_at?: string
+          delta?: number
+          id?: string
+          ingredient_id?: string
+          movement_type?: string
+          note?: string | null
+          quantity_after?: number
+          reference_id?: string | null
+          reference_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_stock_movements_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_stock_movements_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ingredients: {
+        Row: {
+          business_id: string
+          cost_per_unit: number
+          created_at: string
+          id: string
+          is_active: boolean
+          low_stock_warning: number
+          name: string
+          stock: number
+          unit: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          cost_per_unit?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          low_stock_warning?: number
+          name: string
+          stock?: number
+          unit?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          cost_per_unit?: number
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          low_stock_warning?: number
+          name?: string
+          stock?: number
+          unit?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredients_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recipe_ingredients: {
+        Row: {
+          business_id: string
+          created_at: string
+          id: string
+          ingredient_id: string
+          product_id: string
+          quantity: number
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          id?: string
+          ingredient_id: string
+          product_id: string
+          quantity?: number
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          id?: string
+          ingredient_id?: string
+          product_id?: string
+          quantity?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipe_ingredients_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recipe_ingredients_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recipe_ingredients_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -1277,6 +1439,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean
+          is_dish: boolean
           item_type: string
           minimum_stock: number
           name: string
@@ -1299,6 +1462,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          is_dish?: boolean
           item_type?: string
           minimum_stock?: number
           name: string
@@ -1321,6 +1485,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          is_dish?: boolean
           item_type?: string
           minimum_stock?: number
           name?: string
@@ -2020,6 +2185,7 @@ export type Database = {
         Returns: boolean
       }
       is_kitchen_staff: { Args: { _business_id: string }; Returns: boolean }
+      is_manager: { Args: { _business_id: string }; Returns: boolean }
       lookup_business_by_code: { Args: { _code: string }; Returns: string }
       owns_business: { Args: { _business_id: string }; Returns: boolean }
       pay_invoice: {
@@ -2029,6 +2195,14 @@ export type Database = {
       quick_add_product: {
         Args: { p_business_id: string; p_name: string; p_price: number }
         Returns: string
+      }
+      recompute_dish_cost: {
+        Args: { p_product_id?: string }
+        Returns: undefined
+      }
+      restock_ingredient: {
+        Args: { p_ingredient_id: string; p_quantity: number; p_unit_cost?: number }
+        Returns: boolean
       }
       record_sale_payment: {
         Args: {
