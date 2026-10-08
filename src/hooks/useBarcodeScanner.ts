@@ -6,7 +6,7 @@ export type BarcodeScannerOptions = {
   enabled?: boolean;
   minLength?: number;       // min chars to accept (default 4)
   maxIntervalMs?: number;   // max gap between chars (default 300ms — tolerant of Bluetooth latency)
-  idleMs?: number;          // auto-fire after this silence once a full code is buffered (default 120ms)
+  idleMs?: number;          // auto-fire after this silence once a full code is buffered (default 300ms)
 };
 
 /**
@@ -111,7 +111,7 @@ export function useBarcodeScanner(
   const enabled = options?.enabled !== false;
   const minLength = options?.minLength ?? 4;
   const maxInterval = options?.maxIntervalMs ?? 300;
-  const idleMs = options?.idleMs ?? 120;
+  const idleMs = options?.idleMs ?? 300;
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
 
@@ -126,7 +126,6 @@ export function useBarcodeScanner(
 
     let scannerInput: HTMLInputElement | null = null;   // opted-in scan box
     let plainField: EditableEl | null = null;           // field we may have to restore
-    let guarded = false;        // editable that never opted in — hard to hijack
     let scannerStartLen = 0;
     let plainStartLen = 0;
     let restoreTo: string | null = null;
@@ -142,7 +141,6 @@ export function useBarcodeScanner(
       buffer = "";
       scannerInput = null;
       plainField = null;
-      guarded = false;
       scannerStartLen = 0;
       plainStartLen = 0;
       restoreTo = null;
@@ -154,11 +152,8 @@ export function useBarcodeScanner(
           scannerStartLen = target.value.length;
         } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
           plainField = target;
-          guarded = true;
           plainStartLen = target.value.length;
           restoreTo = target.value;
-        } else if (target.isContentEditable) {
-          guarded = true;
         }
       }
       lastTarget = target;
@@ -173,19 +168,18 @@ export function useBarcodeScanner(
       return buffer;
     };
 
+    // A code only counts as a scan when the whole burst lands at machine
+    // speed. Without this bound an opted-in scan box fired mid-burst on its
+    // first few characters, so slow Bluetooth scanners flashed a "Barcode not
+    // found" for a truncated code before the full one had even arrived.
     const shouldFire = (raw: string): boolean => {
       const len = raw.length;
       if (len < 1) return false;
-      if (guarded) {
-        // Never take a field over on ordinary typing — only on a burst no
-        // person produces.
-        const total = Date.now() - burstStart;
-        return (
-          len >= Math.max(minLength, SCANNER_MIN_LENGTH) &&
-          total <= Math.max(SCANNER_MIN_TOTAL_MS, len * SCANNER_MS_PER_CHAR)
-        );
-      }
-      return len >= minLength;
+      const total = Date.now() - burstStart;
+      return (
+        len >= Math.max(minLength, SCANNER_MIN_LENGTH) &&
+        total <= Math.max(SCANNER_MIN_TOTAL_MS, len * SCANNER_MS_PER_CHAR)
+      );
     };
 
     const doFire = (raw: string) => {
@@ -230,13 +224,10 @@ export function useBarcodeScanner(
         return;
       }
 
-      if (shouldFire(raw)) {
-        doFire(raw);
-        return;
-      }
-
-      // Incomplete but plausible — auto-fire once the scanner falls silent,
-      // which covers scanners configured without an Enter suffix.
+      // No immediate firing: a code is dispatched only when the burst is
+      // complete — on Enter above, or after `idleMs` of silence here. Scanners
+      // without an Enter suffix stream the code and go quiet, so the silence
+      // window is the completion signal, not the first N characters.
       if (raw.length >= 1) {
         idleTimer = setTimeout(() => {
           idleTimer = null;

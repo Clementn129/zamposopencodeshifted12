@@ -278,6 +278,136 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     void refetchProducts();
   };
 
+  // A scan that missed the local list is usually one of three things, not a
+  // real "not found": the product is deactivated, its barcode sits on a parent
+  // with variants, or the local cache is stale (pending ops can skip a refetch
+  // — see useProducts). Query the server by barcode before crying wolf, and
+  // never toast the same code twice in a row (scanners double-deliver).
+  const lastScanMissRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
+
+  const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+
+  const rowToCartProduct = (r: {
+    id: string;
+    name: string;
+    price: number | null;
+    cost_price: number | null;
+    stock: number | null;
+    track_stock: boolean;
+    tax_category: string | null;
+    is_active: boolean;
+    parent_id: string | null;
+    variant_label: string | null;
+    item_type: string | null;
+  }): Product => ({
+    id: r.id,
+    businessId: business?.id ?? "",
+    name: r.name,
+    price: Number(r.price ?? 0),
+    costPrice: r.cost_price != null ? Number(r.cost_price) : null,
+    stock: Number(r.stock ?? 0),
+    minimumStock: 0,
+    category: null,
+    barcode: null,
+    isActive: r.is_active,
+    itemType: r.item_type === "service" ? "service" : "product",
+    trackStock: r.track_stock !== false,
+    taxCategory: (r.tax_category as Product["taxCategory"]) ?? "taxable",
+    imageUrl: null,
+    imagePath: null,
+    parentId: r.parent_id,
+    variantLabel: r.variant_label,
+  });
+
+  const resolveScanMiss = async (trimmed: string) => {
+    const now = Date.now();
+    const lower = trimmed.toLowerCase();
+    if (lastScanMissRef.current.code === lower && now - lastScanMissRef.current.at < 2000) return;
+    lastScanMissRef.current = { code: lower, at: now };
+
+    // Fall back to populating the search box so the user sees the code while
+    // the server resolution below runs.
+    setSearchQuery(trimmed);
+
+    const toastNotFound = () =>
+      toast({
+        variant: "destructive",
+        title: "Barcode not found",
+        description: isOnline
+          ? trimmed
+          : `${trimmed} — offline, so this may be a product added after the last sync.`,
+      });
+
+    if (!isOnline || !business?.id) {
+      toastNotFound();
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .select("id, name, price, cost_price, stock, track_stock, tax_category, is_active, parent_id, variant_label, item_type")
+        .eq("business_id", business.id)
+        .or(`barcode.ilike.${escapeLike(trimmed)}`)
+        .limit(5);
+      if (error) throw error;
+      const rows = data ?? [];
+      if (rows.length === 0) {
+        toastNotFound();
+        return;
+      }
+
+      const active = rows.filter((r) => r.is_active);
+      const best = active.find((r) => !r.parent_id) ?? active[0];
+
+      if (!best || !best.is_active) {
+        toast({
+          title: `"${best?.name ?? trimmed}" is deactivated`,
+          description: "Re-enable it in Products to sell it again.",
+        });
+        return;
+      }
+
+      // A barcode on a parent row hides behind its variants in the POS grid.
+      if (!best.parent_id) {
+        const { data: variants } = await supabase
+          .from("products")
+          .select("id, is_active")
+          .eq("parent_id", best.id);
+        const sellableVariants = (variants ?? []).filter((v) => v.is_active);
+        if (sellableVariants.length === 1) {
+          const { data: singleVariant } = await supabase
+            .from("products")
+            .select("id, name, price, cost_price, stock, track_stock, tax_category, is_active, parent_id, variant_label, item_type")
+            .eq("id", sellableVariants[0].id)
+            .maybeSingle();
+          if (singleVariant) {
+            await addProductToCart(rowToCartProduct(singleVariant));
+            void refetchProducts();
+            setSearchQuery("");
+            searchInputRef.current?.focus({ preventScroll: true });
+            return;
+          }
+        }
+        if (sellableVariants.length > 1) {
+          toast({
+            title: `"${best.name}" has variants`,
+            description: `Scan a variant's own barcode — ${sellableVariants.length} variants are available.`,
+          });
+          return;
+        }
+      }
+
+      // Active row that simply isn't in the local list yet (stale cache).
+      await addProductToCart(rowToCartProduct(best));
+      void refetchProducts();
+      setSearchQuery("");
+      searchInputRef.current?.focus({ preventScroll: true });
+    } catch {
+      toastNotFound();
+    }
+  };
+
   // Barcode scanner support — works with any USB/Bluetooth keyboard-wedge
   // scanner. Looks up by exact barcode first, then product id, then name.
   useBarcodeScanner((code) => {
@@ -293,15 +423,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       setSearchQuery("");
       searchInputRef.current?.focus({ preventScroll: true });
     } else {
-      // Fall back to populating the search box so the user sees the code.
-      setSearchQuery(trimmed);
-      toast({
-        variant: "destructive",
-        title: "Barcode not found",
-        description: isOnline
-          ? trimmed
-          : `${trimmed} — offline, so this may be a product added after the last sync.`,
-      });
+      void resolveScanMiss(trimmed);
     }
   }, { enabled: activeTab === "sale" });
 
