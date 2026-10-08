@@ -92,7 +92,7 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
   const paidStatus = String(payment?.status ?? "").toLowerCase();
   if (paidStatus !== "successful") {
     if (paidStatus === "pending" || paidStatus === "pay-offline" || paidStatus === "processing") {
-      throw new Error("Payment is still pending confirmation. Try again in a moment.");
+      throw new Error("Payment is still pending confirmation — your subscription will update automatically once it clears. Please don't pay again.");
     }
     throw new Error(`Payment not completed (status: ${payment?.status || "unknown"})`);
   }
@@ -101,8 +101,26 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
     throw new Error(`Paid amount ZMW ${payment?.amount} is below the required ZMW ${expectedAmount}`);
   }
 
-  // 4. Extend from the later of now or the current expiry.
   const now = new Date();
+
+  // 4. Claim the reference BEFORE extending. lenco_reference is unique, so this
+  //    insert is what makes every reference single-use — Lenco reports
+  //    "successful" forever, and without this a paid reference could be
+  //    replayed to extend the subscription over and over.
+  const { error: claimErr } = await admin.from("payments").insert({
+    business_id: businessId,
+    amount: expectedAmount,
+    status: "approved",
+    approved_at: now.toISOString(),
+    lenco_reference: reference,
+    notes: `Lenco ${reference} — ${months} month(s) subscription renewal (${planLabel})`,
+  });
+  if (claimErr) {
+    if (claimErr.code === "23505") throw new Error("This payment reference has already been used");
+    throw new Error(`Could not record payment: ${claimErr.message}`);
+  }
+
+  // 5. Extend from the later of now or the current expiry.
   const currentExpiry = biz.subscription_expires_at ? new Date(biz.subscription_expires_at) : null;
   const startPoint = currentExpiry && currentExpiry > now ? currentExpiry : now;
   const newExpiry = new Date(startPoint);
@@ -120,22 +138,15 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
       ...(lockedPrice === null ? { monthly_price_zmw: monthlyPrice } : {}),
     })
     .eq("id", businessId);
-  if (uErr) throw new Error(uErr.message);
-
-  // 5. Keep a record the admin can see. Lenco already verified it, so it goes
-  // in as approved (the admin dashboard counts approved payments as revenue).
-  try {
-    const { error: recErr } = await admin.from("payments").insert({
-      business_id: businessId,
-      amount: expectedAmount,
-      status: "approved",
-      approved_at: now.toISOString(),
-      notes: `Lenco ${reference} — ${months} month(s) subscription renewal (${planLabel})`,
-    });
-    if (recErr) console.error("payment record insert:", recErr.message);
-  } catch {
-    // Record-keeping only — the subscription is already extended.
+  if (uErr) {
+    // Nothing was extended — release the claim so the same reference can be
+    // verified again (transient failure), instead of burning a paid reference.
+    await admin.from("payments").delete().eq("lenco_reference", reference);
+    throw new Error(uErr.message);
   }
+
+  // The claim insert above doubles as the admin-visible record (approved =
+  // counted as revenue in the admin dashboard).
 
   return {
     success: true,
