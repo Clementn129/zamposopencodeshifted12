@@ -1,108 +1,59 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+// Verifies a Lenco payment (sandbox or live) with the secret key and extends
+// the caller's subscription. Auth: the signed-in owner's JWT; the business
+// must belong to them.
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { verifyAndExtendSubscription } from "../_shared/subscription.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-Deno.serve(async (req) => {
-  console.log("=== EXTEND SUBSCRIPTION ===");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const body = await req.json();
-    const businessId = body.businessId;
-    const months = body.months;
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "Missing authorization" }, 401);
 
-    console.log("Request body:", JSON.stringify(body));
-
-    if (!businessId || !months) {
-      console.error("Missing required fields");
-      return new Response(
-        JSON.stringify({ error: "Missing businessId or months" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    console.log("SUPABASE_URL:", supabaseUrl ? "set" : "MISSING");
-    console.log("SUPABASE_SERVICE_ROLE_KEY:", supabaseKey ? "set" : "MISSING");
-
-    if (!supabaseUrl || !supabaseKey) {
-      return new Response(
-        JSON.stringify({ error: "Server configuration error" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
+    const caller = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
     });
+    const { data: userData, error: userErr } = await caller.auth.getUser();
+    if (userErr || !userData.user) return json({ error: "Not authenticated" }, 401);
 
-    const monthsNum = typeof months === "number" ? months : parseInt(String(months), 10) || 1;
-    const now = new Date();
-    const addMs = monthsNum * 30 * 24 * 60 * 60 * 1000;
+    const body = await req.json().catch(() => null);
+    if (!body) return json({ error: "Invalid JSON" }, 400);
 
-    // Read current expiry
-    const { data: biz, error: readErr } = await supabase
-      .from("businesses")
-      .select("subscription_expires_at")
-      .eq("id", businessId)
-      .maybeSingle();
-
-    console.log("Business read:", JSON.stringify(biz), "error:", JSON.stringify(readErr));
-
-    if (!biz) {
-      return new Response(
-        JSON.stringify({ error: "Business not found", businessId }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const reference = typeof body.reference === "string" ? body.reference.trim() : "";
+    const businessId = typeof body.businessId === "string" ? body.businessId.trim() : "";
+    const months = Number(body.months);
+    if (!reference || !businessId) return json({ error: "Missing reference or businessId" }, 400);
+    if (!Number.isInteger(months) || months < 1 || months > 24) {
+      return json({ error: "Invalid months" }, 400);
     }
 
-    const currentExpiry = biz.subscription_expires_at ? new Date(biz.subscription_expires_at).getTime() : now.getTime();
-    const baseMs = currentExpiry > now.getTime() ? currentExpiry : now.getTime();
-    const newExpiryMs = baseMs + addMs;
-
-    const newExpiry = new Date(newExpiryMs).toISOString();
-    console.log("New expiry:", newExpiry);
-
-    const { data: updateData, error: updateErr } = await supabase
-      .from("businesses")
-      .update({
-        subscription_expires_at: newExpiry,
-        subscription_status: "active",
-        is_locked: false,
-      })
-      .eq("id", businessId)
-      .select("id, subscription_expires_at, subscription_status, is_locked");
-
-    console.log("Update result:", JSON.stringify(updateData), "error:", JSON.stringify(updateErr));
-
-    if (updateErr) {
-      return new Response(
-        JSON.stringify({ error: "Failed to update", details: updateErr }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        newExpiry,
-        subscriptionStatus: "active",
-        updated: updateData,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (error: any) {
-    console.error("Extend error:", error?.message || String(error));
-    return new Response(
-      JSON.stringify({ error: "Internal error", message: error?.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    const result = await verifyAndExtendSubscription({
+      reference,
+      businessId,
+      months,
+      callerId: userData.user.id,
+    });
+    return json(result);
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : "Payment verification failed" }, 400);
   }
 });

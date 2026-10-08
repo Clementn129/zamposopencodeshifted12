@@ -106,8 +106,11 @@ export const useAuth = () => {
         }
         const msg = String(error?.message || '');
         if (!/fetch|network|timeout/i.test(msg)) {
+          // Server-side error (401/PGRST/etc): retrying won't help, but we
+          // must not go sticky-'unknown' either — fall through to the cached
+          // role below so returning users don't bounce off route guards.
           console.warn('get_my_role failed:', error);
-          return { role: 'unknown' as UserRole, isSuperAdmin: false };
+          break;
         }
       } catch (e) {
         if (attempt === 2) console.warn('resolveRole error:', e);
@@ -123,15 +126,30 @@ export const useAuth = () => {
   }, []);
 
   const applySession = useCallback((session: Session | null, isLoading = false) => {
-    setAuthState(prev => ({
-      ...prev,
-      session,
-      user: session?.user ?? null,
-      isLoading,
-      isSuperAdmin: session?.user ? prev.isSuperAdmin : false,
-      role: session?.user ? prev.role : 'unknown',
-    }));
-  }, []);
+    setAuthState(prev => {
+      let role = session?.user ? prev.role : 'unknown';
+      let isSuperAdmin = session?.user ? prev.isSuperAdmin : false;
+      // Close the refresh race: role resolution is async (get_my_role RPC),
+      // but guards must never see `user && role==='unknown'` — hydrate the
+      // last-known role for this user synchronously, then let resolveRole
+      // refine it over the network.
+      if (session?.user && role === 'unknown') {
+        const cached = readCachedRole(session.user.id);
+        if (cached) {
+          role = cached;
+          isSuperAdmin = cached === 'super_admin';
+        }
+      }
+      return {
+        ...prev,
+        session,
+        user: session?.user ?? null,
+        isLoading,
+        isSuperAdmin,
+        role,
+      };
+    });
+  }, [readCachedRole]);
 
   const clearRecoveryTimer = useCallback(() => {
     if (recoveryTimerRef.current) {
@@ -493,6 +511,12 @@ export const useAuth = () => {
     }
   };
 
+  /** Clears the password-recovery flag once the user has set a new password,
+   *  so returning to /auth later shows the normal login screen. */
+  const clearPasswordRecovery = useCallback(() => {
+    setAuthState(prev => ({ ...prev, isPasswordRecovery: false }));
+  }, []);
+
   /** Safe signOut — never throws, so callers can always navigate after. */
   const signOut = async () => {
     try {
@@ -519,5 +543,6 @@ export const useAuth = () => {
     signInOffline,
     signInOfflineCashier,
     signOut,
+    clearPasswordRecovery,
   };
 };

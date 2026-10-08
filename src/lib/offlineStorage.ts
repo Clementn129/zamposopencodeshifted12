@@ -114,6 +114,10 @@ interface CachedBusiness {
   logoUrl?: string | null;
   vatNumber?: string | null;
   businessType?: string | null;
+  /** Admin-assigned plan label ("1 cashier", etc.); absent on older caches. */
+  planTier?: string | null;
+  /** Grandfathered monthly price (ZMW); NULL/absent = derive from the tier table. */
+  monthlyPriceZmw?: number | null;
   /** Absent on older caches -> must be read as `true` (block negatives). */
   preventNegativeStock?: boolean;
   /** Absent on older caches, and false on unmigrated databases -> CAPEX off. */

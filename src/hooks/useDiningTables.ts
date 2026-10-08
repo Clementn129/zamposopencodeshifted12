@@ -16,13 +16,13 @@ export interface UseDiningTables {
   deleteTable: (id: string) => Promise<boolean>;
 }
 
-export const useDiningTables = (businessId?: string): UseDiningTables => {
-  const [tables, setTables] = useState<DiningTable[]>([]);
+export const useDiningTables = (businessId?: string, enabled = true): UseDiningTables => {
+  const [tables, setTables] = useState<DiningTableRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || !enabled) return;
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -42,12 +42,12 @@ export const useDiningTables = (businessId?: string): UseDiningTables => {
     } finally {
       setIsLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, enabled]);
 
   useEffect(() => {
-    if (!businessId) return;
+    if (!businessId || !enabled) return;
     void load();
-  }, [businessId, load]);
+  }, [businessId, enabled, load]);
 
   const createTable = useCallback(
     async (data: { name: string; floor?: string | null; capacity?: number; sort_order?: number }) => {

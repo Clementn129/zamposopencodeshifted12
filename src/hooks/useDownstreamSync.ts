@@ -151,13 +151,38 @@ export function useDownstreamSync(businessId: string | undefined) {
   useEffect(() => {
     if (!businessId || !isOnline) return;
 
-    void pull();
+    // The initial pull is heavy (products + debtors + sales in one round),
+    // so hold it back until the first paint has settled — running it during
+    // mount competes with rendering the POS and doubles as the app's
+    // background refresh. Reconnects and the 60s interval still pull.
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    let cancelled = false;
+    let idleHandle: number | null = null;
+    const startPull = () => {
+      if (!cancelled) void pull();
+    };
+    if (typeof win.requestIdleCallback === "function") {
+      idleHandle = win.requestIdleCallback(startPull, { timeout: 4000 });
+    } else {
+      idleHandle = window.setTimeout(startPull, 1500);
+    }
 
     const interval = setInterval(() => {
       void pull();
     }, 60000);
 
     return () => {
+      cancelled = true;
+      if (idleHandle !== null) {
+        if (typeof win.cancelIdleCallback === "function" && typeof win.requestIdleCallback === "function") {
+          win.cancelIdleCallback(idleHandle);
+        } else {
+          window.clearTimeout(idleHandle);
+        }
+      }
       clearInterval(interval);
     };
   }, [businessId, isOnline, pull]);

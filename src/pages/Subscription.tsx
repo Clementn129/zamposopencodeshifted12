@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { ArrowLeft, CreditCard, MessageCircle, Phone, Copy, Users, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CreditCard, MessageCircle, Phone, Copy, Users, CheckCircle2, Zap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,10 @@ import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useToast } from "@/hooks/use-toast";
-import { PAYMENT_DETAILS, resolvePricingTier } from "@/lib/paymentDetails";
+import { PAYMENT_DETAILS, resolveMonthlyPrice } from "@/lib/paymentDetails";
+import { MonthSelector } from "@/components/MonthSelector";
+import { useLencoRenewal } from "@/hooks/useLencoRenewal";
 import { supabase } from "@/integrations/supabase/client";
-
-const MONTH_OPTIONS = [1, 3, 6, 12];
 
 const buildWhatsAppRenewalLink = (paymentCode: string, months: number, amount: number, cashiers: number) => {
   const lines = [
@@ -52,9 +52,26 @@ const Subscription = () => {
       .catch(() => {});
   }, [business?.id]);
 
-  const tier = useMemo(() => resolvePricingTier(activeCashiers, business?.planTier), [activeCashiers, business?.planTier]);
+  const tier = useMemo(
+    () =>
+      resolveMonthlyPrice({
+        lockedPriceZmw: business?.monthlyPriceZmw,
+        adminPlanLabel: business?.planTier,
+        activeCashiers,
+      }),
+    [activeCashiers, business?.planTier, business?.monthlyPriceZmw],
+  );
   const isCustom = tier.priceZmw === 0;
   const amountZmw = isCustom ? 0 : months * tier.priceZmw;
+
+  const { paying, payWithLenco } = useLencoRenewal({
+    businessId: business?.id,
+    paymentCode: business?.paymentCode,
+    email: user?.email,
+    months,
+    amountZmw,
+    onRenewed: refetch,
+  });
 
   const handleManualPayment = useCallback(async () => {
     if (!business?.id) return;
@@ -178,17 +195,7 @@ const Subscription = () => {
               ) : (
                 <><div>
                 <p className="text-sm font-medium mb-2">Months</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {MONTH_OPTIONS.map((m) => (
-                    <Button
-                      key={m}
-                      variant={months === m ? "default" : "outline"}
-                      onClick={() => setMonths(m)}
-                    >
-                      {m}
-                    </Button>
-                  ))}
-                </div>
+                <MonthSelector months={months} onChange={setMonths} />
               </div>
 
               <div className="bg-muted/50 rounded-lg p-4 text-center space-y-1">
@@ -198,8 +205,17 @@ const Subscription = () => {
 
               {!submitted ? (
                 <>
+                  <Button
+                    variant="pos"
+                    className="w-full text-lg py-6"
+                    onClick={payWithLenco}
+                    disabled={!isOnline || paying}
+                  >
+                    {paying ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Processing...</> : <><Zap className="h-4 w-4 mr-1" /> Pay Securely Now</>}
+                  </Button>
+
                   <div className="bg-muted rounded-lg p-4 space-y-3">
-                    <p className="text-sm font-medium">Payment Details</p>
+                    <p className="text-sm font-medium">Manual Payment Details</p>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">MTN MoMo:</span>

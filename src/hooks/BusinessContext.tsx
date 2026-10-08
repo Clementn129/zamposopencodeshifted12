@@ -44,6 +44,8 @@ export interface Business {
   customTaxName?: string | null;
   customTaxRate?: number | null;
   planTier?: string | null;
+  /** Grandfathered monthly price (ZMW). NULL/undefined = derive from the tier table. */
+  monthlyPriceZmw?: number | null;
   businessType?: string | null;
   /** Opt-in flag. Absent/undefined must be treated as `true` (block negatives). */
   preventNegativeStock: boolean;
@@ -96,6 +98,9 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
   customTaxRate: row.custom_tax_rate != null ? Number(row.custom_tax_rate) : null,
   planTier: (row as unknown as Record<string, unknown>).plan_tier
     ? String((row as unknown as Record<string, unknown>).plan_tier)
+    : null,
+  monthlyPriceZmw: (row as unknown as Record<string, unknown>).monthly_price_zmw != null
+    ? Number((row as unknown as Record<string, unknown>).monthly_price_zmw)
     : null,
   businessType: row.business_type ?? null,
   preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
@@ -168,16 +173,25 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       tpin: row.tpin,
       logoUrl: row.logo_url,
       vatNumber: row.vat_number,
+      planTier: (row as unknown as Record<string, unknown>).plan_tier
+        ? String((row as unknown as Record<string, unknown>).plan_tier)
+        : null,
+      monthlyPriceZmw: (row as unknown as Record<string, unknown>).monthly_price_zmw != null
+        ? Number((row as unknown as Record<string, unknown>).monthly_price_zmw)
+        : null,
       businessType: row.business_type ?? null,
       preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
       capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
     }, user?.id);
   }, [user?.id]);
 
-  const loadCachedBusiness = useCallback(async (businessId?: string): Promise<boolean> => {
+  const loadCachedBusiness = useCallback(async (businessId?: string, opts?: { onlyIfEmpty?: boolean }): Promise<boolean> => {
     const cachedBiz = businessId
       ? await getCachedBusinessById(businessId)
       : await getCachedBusiness(user?.id);
+    // Initial hydration must never go backwards: if the server row landed
+    // while this cache read was in flight, keep the fresher row.
+    if (opts?.onlyIfEmpty && businessRef.current) return true;
     // A specific branch may only be restored if it was cached for this account
     // (or predates per-account tagging), matching getCachedBusiness's rules.
     const owned = !!cachedBiz && (!cachedBiz.cachedForUser || cachedBiz.cachedForUser === user?.id);
@@ -204,16 +218,26 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         tpin: cachedBiz.tpin ?? null,
         logoUrl: cachedBiz.logoUrl ?? null,
         vatNumber: cachedBiz.vatNumber ?? null,
+        planTier: cachedBiz.planTier ?? null,
+        monthlyPriceZmw: cachedBiz.monthlyPriceZmw ?? null,
         businessType: cachedBiz.businessType ?? null,
         preventNegativeStock: cachedBiz.preventNegativeStock !== false,
         capexEnabled: cachedBiz.capexEnabled === true,
       });
+      // A cached row is real, paintable business state: stop gating pages on
+      // the network waterfall while fetchAll reconciles with the server.
+      setIsLoading(false);
+      clearLoadingTimer();
       return true;
     }
     // An explicit branch target must never fall through to the generic
     // "Offline Mode" placeholder — that would silently swap the branch for a
     // blank business with an empty id.
     if (businessId) return false;
+    // Initial hydration paints a real cached business row only; the generic
+    // "Offline Mode" placeholder stays fetchAll's fallback, after the server
+    // has had its chance to resolve the real business.
+    if (opts?.onlyIfEmpty) return false;
     const cached = getCachedSubscription();
     if (!cached) return false;
     const now = getAdjustedTime();
@@ -233,8 +257,10 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       preventNegativeStock: true,
       capexEnabled: false,
     });
+    setIsLoading(false);
+    clearLoadingTimer();
     return true;
-  }, [user?.id]);
+  }, [user?.id, clearLoadingTimer]);
 
   const updateSubscriptionStatusInDB = useCallback(
     async (bizId: string, currentStatus: string, expiresAt: string | null) => {
@@ -486,6 +512,15 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       daysRemaining,
     };
   }, [business]);
+
+  // Instant first paint: hydrate the last-used business from IndexedDB as
+  // soon as auth resolves, so route guards/pages don't sit behind fetchAll's
+  // serial network waterfall (group -> cached id -> row -> touch). fetchAll
+  // still runs and reconciles with the server afterwards.
+  useEffect(() => {
+    if (authLoading || !user?.id) return;
+    void loadCachedBusiness(undefined, { onlyIfEmpty: true });
+  }, [authLoading, user?.id, loadCachedBusiness]);
 
   // Initial load + when user changes or connectivity flaps. Pass the active
   // id so a re-run (fetchAll's identity depends on isOnline) reloads the branch

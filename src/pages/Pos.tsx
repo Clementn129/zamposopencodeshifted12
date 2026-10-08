@@ -25,9 +25,7 @@ import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { useProducts, Product } from "@/hooks/useProducts";
-import { useSalesSync } from "@/hooks/useSalesSync";
-import { usePendingOpsSync } from "@/hooks/usePendingOpsSync";
-import { useDownstreamSync } from "@/hooks/useDownstreamSync";
+import { useSyncStatus } from "@/contexts/SyncStatusContext";
 import { useBusinessType } from "@/hooks/useBusinessType";
 import { useMenuModifiers } from "@/hooks/useMenuModifiers";
 import { useDiningTables, DiningTable } from "@/hooks/useDiningTables";
@@ -91,11 +89,11 @@ const Pos = () => {
   }, [business?.id, role, user]);
 
   const { activeProducts, isLoading: productsLoading, isOnline, refetch: refetchProducts } = useProducts(business?.id);
-  const { isSyncing, pendingCount, lastSyncError, syncNow } = useSalesSync(business?.id);
-  const { failedOps, retryFailedOps, clearFailedOps, syncNow: syncOpsNow } = usePendingOpsSync(business?.id, business?.preventNegativeStock);
-  const { isPulling, pullNow } = useDownstreamSync(business?.id);
+  // Sync state/actions are owned by AppSyncManager; consuming them here keeps
+  // a single instance of the sync hooks (duplicates doubled timers/RPCs).
+  const { isSyncing, pendingCount, lastSyncError, syncNow, failedOps, retryFailedOps, clearFailedOps, syncOpsNow, isPulling, pullNow } = useSyncStatus();
   const { labels, isService, isRestaurant } = useBusinessType(business?.id, business?.businessType);
-  const { groups: modifierGroups, modifiersByGroup, groupIdsByProduct, isLoading: modifiersLoading } = useMenuModifiers(business?.id);
+  const { groups: modifierGroups, modifiersByGroup, groupIdsByProduct, isLoading: modifiersLoading } = useMenuModifiers(business?.id, isRestaurant);
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "mobile_money">("cash");
@@ -137,7 +135,7 @@ const Pos = () => {
   const [modifierProduct, setModifierProduct] = useState<{ id: string; name: string; basePrice: number } | null>(null);
 
   // Dine-in table picker (restaurant)
-  const { tables: diningTables, isLoading: tablesLoading } = useDiningTables(business?.id);
+  const { tables: diningTables, isLoading: tablesLoading } = useDiningTables(business?.id, isRestaurant);
   const [selectedTable, setSelectedTable] = useState<DiningTable | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
 

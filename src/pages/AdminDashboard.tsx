@@ -15,7 +15,7 @@ import AdminAffiliatePanel from "@/components/AdminAffiliatePanel";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { clearOfflineSession } from "@/lib/offlineStorage";
-import { PAYMENT_DETAILS, PRICING_TIERS } from "@/lib/paymentDetails";
+import { PAYMENT_DETAILS, PRICING_TIERS, resolveMonthlyPrice } from "@/lib/paymentDetails";
 import { exportBusinessesToCsv } from "@/lib/csvExport";
 import { useToast } from "@/hooks/use-toast";
 
@@ -33,6 +33,7 @@ type BusinessRow = {
   email: string | null;
   address: string | null;
   plan_tier: string | null;
+  monthly_price_zmw: number | null;
 };
 
 
@@ -86,6 +87,10 @@ const AdminDashboard = () => {
   // Subscription extension state
   const [extendAmount, setExtendAmount] = useState<Record<string, number>>({});
   const [extendUnit, setExtendUnit] = useState<Record<string, 'days' | 'weeks' | 'months'>>({});
+  // Active cashier counts per business (for automatic/tier pricing display).
+  const [cashierCounts, setCashierCounts] = useState<Record<string, number>>({});
+  // Draft values for the per-business locked-price input.
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
 
   // Notice form state
   const [noticeTitle, setNoticeTitle] = useState("");
@@ -108,11 +113,28 @@ const AdminDashboard = () => {
     try {
       const { data: biz, error: bizErr } = await supabase
         .from("businesses")
-        .select("id,name,user_id,payment_code,subscription_status,subscription_expires_at,is_locked,last_sync_at,created_at,phone,email,address,plan_tier")
+        .select("id,name,user_id,payment_code,subscription_status,subscription_expires_at,is_locked,last_sync_at,created_at,phone,email,address,plan_tier,monthly_price_zmw")
         .order("created_at", { ascending: false })
         .limit(200);
       if (bizErr) throw bizErr;
       setBusinesses((biz ?? []) as BusinessRow[]);
+
+      // Active cashier counts feed the "automatic" tier price for businesses
+      // that don't have a locked price yet.
+      try {
+        const { data: cashiers } = await supabase
+          .from("business_cashiers")
+          .select("business_id")
+          .eq("is_active", true)
+          .limit(5000);
+        const counts: Record<string, number> = {};
+        for (const c of (cashiers ?? []) as Array<{ business_id: string }>) {
+          counts[c.business_id] = (counts[c.business_id] ?? 0) + 1;
+        }
+        setCashierCounts(counts);
+      } catch {
+        // Non-fatal: locked prices don't need the counts.
+      }
 
       const { data: pay, error: payErr } = await supabase
         .from("payments")
@@ -160,13 +182,22 @@ const AdminDashboard = () => {
         .eq("id", p.id);
       if (updPayErr) throw updPayErr;
 
-      const months = Math.max(1, Math.round(Number(p.amount) / PAYMENT_DETAILS.pricePerMonthZmw));
-      const extendDays = months * 30;
-
       const biz = businesses.find((b) => b.id === p.business_id);
+      // Months covered = amount paid / the business's effective monthly price
+      // (locked price wins; else its plan tier / cashier count).
+      const { priceZmw } = resolveMonthlyPrice({
+        lockedPriceZmw: biz?.monthly_price_zmw,
+        adminPlanLabel: biz?.plan_tier,
+        activeCashiers: cashierCounts[p.business_id] ?? 0,
+      });
+      const unitPrice = priceZmw > 0 ? priceZmw : PAYMENT_DETAILS.pricePerMonthZmw;
+      const months = Math.max(1, Math.round(Number(p.amount) / unitPrice));
+
       const base = biz?.subscription_expires_at ? new Date(biz.subscription_expires_at) : new Date();
       const start = base.getTime() > Date.now() ? base : new Date();
-      const newExpires = new Date(start.getTime() + extendDays * 24 * 60 * 60 * 1000).toISOString();
+      const newExpiresDate = new Date(start);
+      newExpiresDate.setMonth(newExpiresDate.getMonth() + months);
+      const newExpires = newExpiresDate.toISOString();
 
       const { error: updBizErr } = await supabase
         .from("businesses")
@@ -179,7 +210,7 @@ const AdminDashboard = () => {
         .eq("id", p.business_id);
       if (updBizErr) throw updBizErr;
 
-      toast({ title: "Approved", description: `Extended by ${extendDays} days.` });
+      toast({ title: "Approved", description: `Extended by ${months} month${months === 1 ? "" : "s"}.` });
       await refresh();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Failed", description: e?.message ?? "Could not approve" });
@@ -344,6 +375,46 @@ const AdminDashboard = () => {
     }
   };
 
+  // Commit an edited locked price (super-admin only). Empty = automatic pricing.
+  const commitPrice = async (b: BusinessRow) => {
+    const raw = priceDraft[b.id];
+    if (raw === undefined) return; // nothing typed
+    const trimmed = raw.trim();
+    const value = trimmed === "" ? null : Number(trimmed);
+    const clearDraft = () =>
+      setPriceDraft((prev) => {
+        const next = { ...prev };
+        delete next[b.id];
+        return next;
+      });
+
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      toast({ variant: "destructive", title: "Invalid price", description: "Enter a non-negative amount, or leave blank for automatic." });
+      clearDraft();
+      return;
+    }
+    if (value === (b.monthly_price_zmw ?? null)) {
+      clearDraft();
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from("businesses")
+        .update({ monthly_price_zmw: value, updated_at: new Date().toISOString() })
+        .eq("id", b.id);
+      if (error) throw error;
+      toast({
+        title: "Price updated",
+        description: value === null ? "Reverted to automatic pricing." : `Locked at K${value}/month.`,
+      });
+      clearDraft();
+      await refresh();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Failed", description: e?.message ?? "Could not update price" });
+      clearDraft();
+    }
+  };
+
 
   const handleExportCsv = () => {
     exportBusinessesToCsv(businesses, 'salepoint-businesses');
@@ -472,7 +543,17 @@ const AdminDashboard = () => {
     );
     const monthlyRevenue = monthlyApproved.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-    const expectedRevenue = active * PAYMENT_DETAILS.pricePerMonthZmw;
+    // Expected revenue = sum of each active business's effective monthly price.
+    const expectedRevenue = businesses
+      .filter((b) => !b.is_locked && b.subscription_status === "active")
+      .reduce((sum, b) => {
+        const { priceZmw } = resolveMonthlyPrice({
+          lockedPriceZmw: b.monthly_price_zmw,
+          adminPlanLabel: b.plan_tier,
+          activeCashiers: cashierCounts[b.id] ?? 0,
+        });
+        return sum + (priceZmw > 0 ? priceZmw : 0);
+      }, 0);
     const collectionRate = expectedRevenue > 0 ? Math.round((monthlyRevenue / expectedRevenue) * 100) : 0;
 
     return {
@@ -483,8 +564,9 @@ const AdminDashboard = () => {
       monthlyRevenue,
       monthlyCount: monthlyApproved.length,
       collectionRate,
+      expectedRevenue,
     };
-  }, [businesses, payments]);
+  }, [businesses, payments, cashierCounts]);
 
 
   if (authLoading || !adminChecked || (isSuperAdmin && loading)) {
@@ -620,7 +702,7 @@ const AdminDashboard = () => {
                   </div>
                   <div className="rounded-xl border border-border/60 p-4">
                     <p className="text-xs text-muted-foreground">Expected Monthly Revenue</p>
-                    <p className="text-2xl font-bold">K{(stats.active * PAYMENT_DETAILS.pricePerMonthZmw).toFixed(2)}</p>
+                    <p className="text-2xl font-bold">K{stats.expectedRevenue.toFixed(2)}</p>
                     <p className="text-xs text-muted-foreground mt-1">Based on active × lowest tier</p>
                   </div>
                   <div className="rounded-xl border border-border/60 p-4">
@@ -848,6 +930,20 @@ const AdminDashboard = () => {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Label className="text-xs text-muted-foreground">Monthly price</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step="1"
+                              placeholder="Auto"
+                              className="h-8 text-xs w-24"
+                              value={priceDraft[b.id] ?? (b.monthly_price_zmw != null ? String(b.monthly_price_zmw) : "")}
+                              onChange={(e) => setPriceDraft((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                              onBlur={() => commitPrice(b)}
+                            />
+                            <span className="text-xs text-muted-foreground">ZMW/mo</span>
                           </div>
                         </div>
                       </div>

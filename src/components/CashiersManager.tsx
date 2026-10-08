@@ -323,8 +323,6 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                 <div className="flex items-center gap-1 shrink-0">
                   {stockAccessAvailable && (
                     <div className="flex items-center gap-2 mr-2">
-                  {stockAccessAvailable && (
-                    <div className="flex items-center gap-2 mr-2">
                       <Switch
                         id={`stock-access-${c.id}`}
                         checked={c.can_adjust_stock}

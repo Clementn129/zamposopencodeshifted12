@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle, HardHat } from "lucide-react";
+import { ArrowLeft, Download, TrendingUp, ShoppingCart, Receipt, Wallet, AlertCircle, HardHat, Boxes, AlertTriangle, PackageX, Coins } from "lucide-react";
 import { format } from "date-fns";
 import { lusakaDayRange, lusakaWeekRange, lusakaMonthRange, lusakaDateLabel } from "@/lib/dateRange";
 
@@ -16,10 +16,36 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatZMW } from "@/lib/currency";
 import { useToast } from "@/hooks/use-toast";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { getCachedSalesHistory, getCachedExpenses, getCachedDebtors } from "@/lib/offlineStorage";
+import { getCachedSalesHistory, getCachedExpenses, getCachedDebtors, getCachedProducts } from "@/lib/offlineStorage";
 import { CAPEX_CATEGORY_LABELS } from "@/lib/capex";
 
 type Period = "today" | "week" | "month";
+
+/** Normalised product row used only by the Stock report. */
+type StockRow = {
+  id: string;
+  name: string;
+  stock: number;
+  cost: number;
+  price: number;
+  minimum: number;
+  itemType: string;
+  active: boolean;
+  trackStock: boolean;
+};
+
+/** Minimal shape of a `products` row as selected for the Stock report. */
+type ProductRow = {
+  id: string;
+  name: string;
+  price: number | null;
+  cost_price: number | null;
+  stock: number | null;
+  minimum_stock: number | null;
+  is_active: boolean | null;
+  item_type: string | null;
+  track_stock: boolean | null;
+};
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -30,6 +56,7 @@ const Reports = () => {
   const { user, isLoading: authLoading } = useAuthContext();
   const { business, isLoading: bizLoading } = useBusiness(user?.id);
   const [period, setPeriod] = useState<Period>("today");
+  const [reportView, setReportView] = useState<"sales" | "stock">("sales");
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [loading, setLoading] = useState(true);
@@ -39,6 +66,8 @@ const Reports = () => {
   // CAPEX is fetched separately and never blocks the report: a missing `capex`
   // table must not take revenue/profit down with it.
   const [capex, setCapex] = useState<any[]>([]);
+  // Current stock snapshot for the Stock report (not period-bound).
+  const [stock, setStock] = useState<StockRow[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
@@ -56,10 +85,11 @@ const Reports = () => {
     setLoading(true);
     try {
       if (!isOnline) {
-        const [cachedSales, cachedExpenses, cachedDebtors] = await Promise.all([
+        const [cachedSales, cachedExpenses, cachedDebtors, cachedProducts] = await Promise.all([
           getCachedSalesHistory(business.id),
           getCachedExpenses(business.id),
           getCachedDebtors(business.id),
+          getCachedProducts(business.id),
         ]);
         const from = range.from.getTime();
         const to = range.to.getTime();
@@ -72,11 +102,22 @@ const Reports = () => {
           return t >= from && t <= to;
         }));
         setDebtors(cachedDebtors.map(d => ({ id: d.id, amount_owed: d.amountOwed, amount_paid: d.amountPaid, balance_due: d.amountOwed - d.amountPaid, status: d.status })));
+        setStock(cachedProducts.map((p) => ({
+          id: p.id,
+          name: p.name,
+          stock: Number(p.stock) || 0,
+          cost: Number(p.costPrice) || 0,
+          price: Number(p.price) || 0,
+          minimum: Number(p.minimumStock) || 0,
+          itemType: (p as { itemType?: string }).itemType ?? "product",
+          active: p.isActive !== false,
+          trackStock: p.trackStock !== false,
+        })));
         toast({ title: "Offline data", description: "Showing cached report data." });
         return;
       }
 
-      const [{ data: s }, { data: e }, { data: d }] = await Promise.all([
+      const [{ data: s }, { data: e }, { data: d }, { data: p }] = await Promise.all([
         supabase
           .from("sales")
           .select("id, total, items, tax_amount, payment_method, cashier_name, status, created_at")
@@ -96,10 +137,26 @@ const Reports = () => {
           .select("id, amount_owed, amount_paid, status")
           .eq("business_id", business.id)
           .limit(5000),
+        supabase
+          .from("products")
+          .select("id, name, price, cost_price, stock, minimum_stock, is_active, item_type, track_stock")
+          .eq("business_id", business.id)
+          .limit(5000),
       ]);
       setSales(s ?? []);
       setExpenses(e ?? []);
       setDebtors(d ?? []);
+      setStock(((p ?? []) as ProductRow[]).map((r) => ({
+        id: r.id,
+        name: r.name,
+        stock: Number(r.stock) || 0,
+        cost: Number(r.cost_price) || 0,
+        price: Number(r.price) || 0,
+        minimum: Number(r.minimum_stock) || 0,
+        itemType: r.item_type ?? "product",
+        active: r.is_active !== false,
+        trackStock: r.track_stock !== false,
+      })));
 
       // CAPEX only when the feature is on. Offline it simply stays empty rather
       // than showing a stale figure for a period the user can no longer verify.
@@ -228,6 +285,35 @@ const Reports = () => {
     return { comparableLines, overrideLines, givenAway, chargedExtra };
   }, [sales]);
 
+  // Stock snapshot: current on-hand value and the items that need attention.
+  // Service items don't carry stock, so they are excluded from every figure.
+  const stockStats = useMemo(() => {
+    const rows = stock.filter((r) => r.active && r.itemType !== "service");
+    let costValue = 0;
+    let retailValue = 0;
+    let units = 0;
+    const low: StockRow[] = [];
+    const out: StockRow[] = [];
+    for (const r of rows) {
+      costValue += r.cost * r.stock;
+      retailValue += r.price * r.stock;
+      units += r.stock;
+      if (r.stock <= 0) out.push(r);
+      else if (r.stock <= r.minimum) low.push(r);
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    low.sort((a, b) => a.stock - b.stock);
+    return {
+      items: rows.length,
+      costValue,
+      retailValue,
+      potentialProfit: retailValue - costValue,
+      units,
+      low,
+      out,
+    };
+  }, [stock]);
+
   const exportCsv = () => {
     const rows: string[] = [];
     rows.push("Sale Point Report");
@@ -271,6 +357,37 @@ const Reports = () => {
     toast({ title: "Report exported" });
   };
 
+  const exportStockCsv = () => {
+    const rows: string[] = [];
+    rows.push("Sale Point Stock Report");
+    rows.push(`Business,${business?.name ?? ""}`);
+    rows.push(`Generated,${format(new Date(), "yyyy-MM-dd HH:mm")}`);
+    rows.push("");
+    rows.push("Metric,Value");
+    rows.push(`Items tracked,${stockStats.items}`);
+    rows.push(`Units on hand,${stockStats.units}`);
+    rows.push(`Stock value (cost),${stockStats.costValue.toFixed(2)}`);
+    rows.push(`Stock value (retail),${stockStats.retailValue.toFixed(2)}`);
+    rows.push(`Potential profit,${stockStats.potentialProfit.toFixed(2)}`);
+    rows.push(`Low stock items,${stockStats.low.length}`);
+    rows.push(`Out of stock items,${stockStats.out.length}`);
+    rows.push("");
+    rows.push("Out of stock,Stock,Min,Cost value");
+    stockStats.out.forEach((r) => rows.push(`"${r.name}",${r.stock},${r.minimum},${(r.cost * r.stock).toFixed(2)}`));
+    rows.push("");
+    rows.push("Low stock,Stock,Min,Cost value");
+    stockStats.low.forEach((r) => rows.push(`"${r.name}",${r.stock},${r.minimum},${(r.cost * r.stock).toFixed(2)}`));
+
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `salepoint-stock-${format(new Date(), "yyyyMMdd-HHmm")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Stock report exported" });
+  };
+
   if (authLoading || bizLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   if (!business) return null;
 
@@ -287,11 +404,20 @@ const Reports = () => {
                 <p className="text-xs text-muted-foreground">Sales, profit & cash flow</p>
               </div>
             </div>
-            <Button size="sm" variant="outline" onClick={exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
+            <Button size="sm" variant="outline" onClick={reportView === "stock" ? exportStockCsv : exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
           </div>
         </header>
 
         <main className="p-4 max-w-4xl mx-auto space-y-4">
+          <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock")}>
+            <TabsList className="grid grid-cols-2 w-full">
+              <TabsTrigger value="sales">Sales & Profit</TabsTrigger>
+              <TabsTrigger value="stock">Stock</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {reportView === "sales" && (
+          <>
           <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)}>
             <TabsList className="grid grid-cols-3 w-full">
               <TabsTrigger value="today">Today</TabsTrigger>
@@ -414,6 +540,70 @@ const Reports = () => {
                 </Card>
               )}
             </>
+          )}
+          </>
+          )}
+
+          {reportView === "stock" && (
+            loading ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Loading...</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard icon={<Boxes className="w-4 h-4" />} label="Items Tracked" value={stockStats.items.toString()} />
+                  <StatCard icon={<Wallet className="w-4 h-4" />} label="Units On Hand" value={stockStats.units.toString()} />
+                  <StatCard icon={<Wallet className="w-4 h-4" />} label="Stock Value (Cost)" value={formatZMW(stockStats.costValue)} />
+                  <StatCard icon={<Coins className="w-4 h-4" />} label="Stock Value (Retail)" value={formatZMW(stockStats.retailValue)} />
+                  <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Expected Profit" value={formatZMW(stockStats.potentialProfit)} highlight />
+                  <StatCard icon={<AlertTriangle className="w-4 h-4" />} label="Low Stock" value={stockStats.low.length.toString()} />
+                  <StatCard icon={<PackageX className="w-4 h-4" />} label="Out of Stock" value={stockStats.out.length.toString()} />
+                </div>
+
+                {stockStats.out.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <PackageX className="h-4 w-4 text-destructive" /> Out of Stock
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-1 text-sm">
+                      {stockStats.out.map((r) => (
+                        <div key={r.id} className="flex justify-between">
+                          <span className="truncate pr-2">{r.name}</span>
+                          <span className="tabular-nums text-destructive">0 on hand</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {stockStats.low.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-600" /> Low Stock
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-1 text-sm">
+                      {stockStats.low.map((r) => (
+                        <div key={r.id} className="flex justify-between">
+                          <span className="truncate pr-2">{r.name}</span>
+                          <span className="tabular-nums">{r.stock} left · min {r.minimum}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {stockStats.items === 0 && (
+                  <p className="text-center text-sm text-muted-foreground py-8">No stock-tracked items found.</p>
+                )}
+
+                <p className="text-xs text-muted-foreground px-1">
+                  Stock value reflects current on-hand quantities. Items without stock tracking are excluded.
+                </p>
+              </>
+            )
           )}
         </main>
       </div>

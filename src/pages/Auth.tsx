@@ -44,13 +44,22 @@ function isEmailRateLimit(error: unknown): boolean {
   return /rate limit|429|too many|security purposes|email address .* rate/.test(msg);
 }
 
+// Marks an in-progress password reset. The PASSWORD_RECOVERY auth event can be
+// missed (it may fire before the Auth page subscribes, or a refresh loses it),
+// so the intent is persisted for the tab and re-read on mount.
+const RESET_INTENT_KEY = 'zampos:password-reset-intent';
+
 const Auth = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { signIn, signInOffline, signInOfflineCashier, signUp, user, role, isPasswordRecovery } = useAuthContext();
+  const { signIn, signInOffline, signInOfflineCashier, signUp, signOut, user, role, isPasswordRecovery, clearPasswordRecovery } = useAuthContext();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  // Set while a reset link is the reason the user is here and they haven't
+  // finished setting a new password yet.
+  const [resetIntent, setResetIntent] = useState(false);
+  const [forgotCooldown, setForgotCooldown] = useState(0);
 
   // Cashier login
   const [cashierCode, setCashierCode] = useState('');
@@ -63,6 +72,34 @@ const Auth = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+
+  // Latch the reset intent: URL flag, the recovery event, or a previously
+  // persisted intent for this tab. Only ever turns on (cleared on success).
+  useEffect(() => {
+    if (resetSuccess) return;
+    let wanted = searchParams.get('reset') === 'true' || isPasswordRecovery;
+    if (!wanted) {
+      try {
+        wanted = sessionStorage.getItem(RESET_INTENT_KEY) === '1';
+      } catch {
+        wanted = false;
+      }
+    }
+    if (!wanted) return;
+    setResetIntent(true);
+    try {
+      sessionStorage.setItem(RESET_INTENT_KEY, '1');
+    } catch {
+      // non-critical
+    }
+  }, [searchParams, isPasswordRecovery, resetSuccess]);
+
+  // Tick the forgot-password cooldown down to zero.
+  useEffect(() => {
+    if (forgotCooldown <= 0) return;
+    const timer = setInterval(() => setForgotCooldown((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [forgotCooldown]);
   
   // Login form
   const [loginEmail, setLoginEmail] = useState('');
@@ -314,6 +351,7 @@ const Auth = () => {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (forgotCooldown > 0) return;
     setIsLoading(true);
 
     try {
@@ -322,11 +360,16 @@ const Auth = () => {
       });
 
       if (error) {
+        const rateLimited = isEmailRateLimit(error);
         toast({
           variant: 'destructive',
-          title: 'Reset Failed',
-          description: error.message,
+          title: rateLimited ? 'Too many requests' : 'Reset Failed',
+          description: rateLimited
+            ? 'A reset link was requested recently. Wait a minute and try again.'
+            : describeAuthError(error, 'We could not send the reset email. Please try again.'),
         });
+        // Rate-limited requests count against the quota too — hold the button.
+        if (rateLimited) setForgotCooldown(60);
       } else {
         toast({
           title: 'Check your email',
@@ -334,12 +377,14 @@ const Auth = () => {
         });
         setShowForgotPassword(false);
         setResetEmail('');
+        // Prevent an immediate re-send (and the rate limit it would trip).
+        setForgotCooldown(60);
       }
     } catch (err) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Something went wrong. Please try again.',
+        description: describeAuthError(err, 'Something went wrong. Please try again.'),
       });
     } finally {
       setIsLoading(false);
@@ -377,10 +422,19 @@ const Auth = () => {
         toast({
           variant: 'destructive',
           title: 'Reset Failed',
-          description: error.message,
+          description: describeAuthError(error, 'We could not update your password. Please try again.'),
         });
       } else {
         setResetSuccess(true);
+        // The reset is done: drop the persisted intent and clear the recovery
+        // flag in auth state so revisiting /auth shows the normal login.
+        try {
+          sessionStorage.removeItem(RESET_INTENT_KEY);
+        } catch {
+          // non-critical
+        }
+        clearPasswordRecovery();
+        navigate('/auth', { replace: true });
         toast({
           title: 'Password Updated',
           description: 'Your password has been changed successfully.',
@@ -390,7 +444,7 @@ const Auth = () => {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Something went wrong. Please try again.',
+        description: describeAuthError(err, 'Something went wrong. Please try again.'),
       });
     } finally {
       setIsLoading(false);
@@ -499,8 +553,10 @@ const Auth = () => {
     }
   };
 
-  // Password Recovery View — shown when user clicks the reset link in email
-  if (isPasswordRecovery && searchParams.get('reset') === 'true') {
+  // Password Recovery View — shown when the user arrived from a reset link
+  // (or a refresh of that page) and a recovery session is live. `isPasswordRecovery`
+  // alone is unreliable, so the URL flag / persisted intent is the trigger.
+  if (resetIntent && user) {
     if (resetSuccess) {
       return (
         <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -663,13 +719,15 @@ const Auth = () => {
                   type="submit" 
                   variant="pos"
                   className="w-full"
-                  disabled={isLoading}
+                  disabled={isLoading || forgotCooldown > 0}
                 >
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Sending...
                     </>
+                  ) : forgotCooldown > 0 ? (
+                    `Send again in ${forgotCooldown}s`
                   ) : (
                     'Send Reset Link'
                   )}

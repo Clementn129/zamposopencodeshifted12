@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useSalesSync } from "@/hooks/useSalesSync";
@@ -6,17 +6,35 @@ import { useStockSync } from "@/hooks/useStockSync";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { usePendingOpsSync } from "@/hooks/usePendingOpsSync";
 import { useDownstreamSync } from "@/hooks/useDownstreamSync";
+import { SyncStatusProvider, SyncStatusValue } from "@/contexts/SyncStatusContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export const AppSyncManager = () => {
+// Single owner of the sync stack. Pages (POS) read sync state/actions via
+// SyncStatusProvider instead of mounting duplicate hook instances — duplicates
+// each ran their own mount-time sync/pull plus their own intervals, so a POS
+// load used to trigger the same RPCs and the heavy downstream pull twice.
+export const AppSyncManager = ({ children }: { children?: ReactNode }) => {
   const { user, isLoading } = useAuthContext();
   const { business, refetch: refetchBusiness } = useBusiness(!isLoading ? user?.id : undefined);
 
-  useSalesSync(business?.id);
   useStockSync(business?.id, business?.preventNegativeStock);
   useRealtimeSync(business?.id);
-  usePendingOpsSync(business?.id, business?.preventNegativeStock);
-  useDownstreamSync(business?.id);
+  const salesSync = useSalesSync(business?.id);
+  const opsSync = usePendingOpsSync(business?.id, business?.preventNegativeStock);
+  const downstreamSync = useDownstreamSync(business?.id);
+
+  const syncStatus: SyncStatusValue = {
+    isSyncing: salesSync.isSyncing,
+    pendingCount: salesSync.pendingCount,
+    lastSyncError: salesSync.lastSyncError,
+    syncNow: salesSync.syncNow,
+    failedOps: opsSync.failedOps,
+    retryFailedOps: opsSync.retryFailedOps,
+    clearFailedOps: opsSync.clearFailedOps,
+    syncOpsNow: opsSync.syncNow,
+    isPulling: downstreamSync.isPulling,
+    pullNow: downstreamSync.pullNow,
+  };
 
   // Stable ref so the effect doesn't re-create the channel when refetchBusiness
   // identity changes (e.g. on isOnline toggle).
@@ -56,5 +74,5 @@ export const AppSyncManager = () => {
     };
   }, [user?.id]);
 
-  return null;
+  return <SyncStatusProvider value={syncStatus}>{children}</SyncStatusProvider>;
 };

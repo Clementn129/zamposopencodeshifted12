@@ -14,6 +14,7 @@ interface AuthContextType {
   signInOffline: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInOfflineCashier: (businessCode: string, username: string, pin: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<{ error: Error | null }>;
+  clearPasswordRecovery: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);

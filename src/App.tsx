@@ -84,42 +84,43 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
             <Sonner />
             <PWAUpdatePrompt />
             <BusinessProvider>
-              <AppSyncManager />
-              <BrowserRouter>
-                <SeoReset />
-                <AuthLinkHandler />
-                <Suspense fallback={<PageFallback />}>
-                  <Routes>
-                    <Route path="/" element={<Index />} />
-                    <Route path="/auth" element={<Auth />} />
-                    <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-                    <Route path="/admin/login" element={<AdminLogin />} />
-                    <Route path="/admin-login" element={<AdminLogin />} />
-                    <Route path="/admin" element={<AdminDashboard />} />
-                    <Route path="/dashboard" element={<RequireOwner><Dashboard /></RequireOwner>} />
-                    <Route path="/pos" element={<Pos />} />
-                    <Route path="/kitchen" element={<RequireKitchen><Kitchen /></RequireKitchen>} />
-                    <Route path="/tables" element={<RequireMember restaurantOnly><DiningTabs /></RequireMember>} />
-                    <Route path="/products" element={<RequireOwner><Products /></RequireOwner>} />
-  <Route path="/stock" element={<StockRequests />} />
-                    <Route path="/subscription" element={<RequireOwner><Subscription /></RequireOwner>} />
-                    <Route path="/sales" element={<RequireOwner><SalesHistory /></RequireOwner>} />
-                    <Route path="/reports" element={<RequireOwner><Reports /></RequireOwner>} />
-        <Route path="/capex" element={<RequireOwner><Capex /></RequireOwner>} />
-                    <Route path="/branches" element={<RequireOwner><GroupOverview /></RequireOwner>} />
-                    <Route path="/cashier-activity" element={<RequireOwner><CashierActivity /></RequireOwner>} />
-                    <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
-                    <Route path="/debtors" element={<RequireOwner><Debtors /></RequireOwner>} />
-                    <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
-                    <Route path="/affiliate" element={<RequireOwner><Affiliate /></RequireOwner>} />
-                    <Route path="/affiliate-auth" element={<AffiliateAuth />} />
-                    {seoRoutes.map((r) => (
-                      <Route key={r.path} path={r.path} element={<r.Component />} />
-                    ))}
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </Suspense>
-              </BrowserRouter>
+              <AppSyncManager>
+                <BrowserRouter>
+                  <SeoReset />
+                  <AuthLinkHandler />
+                  <Suspense fallback={<PageFallback />}>
+                    <Routes>
+                      <Route path="/" element={<Index />} />
+                      <Route path="/auth" element={<Auth />} />
+                      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                      <Route path="/admin/login" element={<AdminLogin />} />
+                      <Route path="/admin-login" element={<AdminLogin />} />
+                      <Route path="/admin" element={<AdminDashboard />} />
+                      <Route path="/dashboard" element={<RequireOwner><Dashboard /></RequireOwner>} />
+                      <Route path="/pos" element={<Pos />} />
+                      <Route path="/kitchen" element={<RequireKitchen><Kitchen /></RequireKitchen>} />
+                      <Route path="/tables" element={<RequireMember restaurantOnly><DiningTabs /></RequireMember>} />
+                      <Route path="/products" element={<RequireOwner><Products /></RequireOwner>} />
+                      <Route path="/stock" element={<StockRequests />} />
+                      <Route path="/subscription" element={<RequireOwner><Subscription /></RequireOwner>} />
+                      <Route path="/sales" element={<RequireOwner><SalesHistory /></RequireOwner>} />
+                      <Route path="/reports" element={<RequireOwner><Reports /></RequireOwner>} />
+                      <Route path="/capex" element={<RequireOwner><Capex /></RequireOwner>} />
+                      <Route path="/branches" element={<RequireOwner><GroupOverview /></RequireOwner>} />
+                      <Route path="/cashier-activity" element={<RequireOwner><CashierActivity /></RequireOwner>} />
+                      <Route path="/audit-log" element={<RequireOwner><AuditLog /></RequireOwner>} />
+                      <Route path="/debtors" element={<RequireOwner><Debtors /></RequireOwner>} />
+                      <Route path="/settings" element={<RequireOwner><Settings /></RequireOwner>} />
+                      <Route path="/affiliate" element={<RequireOwner><Affiliate /></RequireOwner>} />
+                      <Route path="/affiliate-auth" element={<AffiliateAuth />} />
+                      {seoRoutes.map((r) => (
+                        <Route key={r.path} path={r.path} element={<r.Component />} />
+                      ))}
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                  </Suspense>
+                </BrowserRouter>
+              </AppSyncManager>
             </BusinessProvider>
           </TooltipProvider>
         </AuthProvider>

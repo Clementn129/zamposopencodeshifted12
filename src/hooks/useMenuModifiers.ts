@@ -24,7 +24,7 @@ export interface UseMenuModifiers {
   setProductGroups: (productId: string, groupIds: string[]) => Promise<boolean>;
 }
 
-export const useMenuModifiers = (businessId?: string): UseMenuModifiers => {
+export const useMenuModifiers = (businessId?: string, enabled = true): UseMenuModifiers => {
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [modifiersByGroup, setModifiersByGroup] = useState<Record<string, MenuModifier[]>>({});
   const [groupIdsByProduct, setGroupIdsByProduct] = useState<Record<string, string[]>>({});
@@ -32,7 +32,7 @@ export const useMenuModifiers = (businessId?: string): UseMenuModifiers => {
   const loadedBusinessId = useRef<string | undefined>(undefined);
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || !enabled) return;
     setIsLoading(true);
     try {
       const [{ data: g, error: ge }, { data: m, error: me }, { data: l, error: le }] = await Promise.all([
@@ -61,13 +61,13 @@ export const useMenuModifiers = (businessId?: string): UseMenuModifiers => {
     } finally {
       setIsLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, enabled]);
 
   useEffect(() => {
-    if (!businessId) return;
+    if (!businessId || !enabled) return;
     void load();
     loadedBusinessId.current = businessId;
-  }, [businessId, load]);
+  }, [businessId, enabled, load]);
 
   const createGroup = useCallback(
     async (name: string, opts?: { min?: number; max?: number }) => {

@@ -36,6 +36,10 @@ const MESSAGES: Record<string, { title: string; description: string }> = {
     title: "Too many emails sent",
     description: "Too many verification emails in a short time. Wait a minute and try again.",
   },
+  redirect_not_allowed: {
+    title: "Link not allowed",
+    description: "That link isn't permitted for this app. Request a fresh password reset email and try again.",
+  },
 };
 
 export function AuthLinkHandler() {
@@ -64,9 +68,11 @@ export function AuthLinkHandler() {
         (description ? description.replace(/\+/g, " ") : "We couldn't verify that link. Please try again."),
     });
 
-    // Strip the error fragment so a refresh doesn't re-show it.
+    // Strip the error fragment so a refresh doesn't re-show it, but keep the
+    // query string (e.g. ?reset=true) so a failed reset link still routes the
+    // user to the recovery screen if a session was established.
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-    navigate("/auth", { replace: true });
+    navigate(`/auth${window.location.search}`, { replace: true });
   }, [location, toast, navigate]);
 
   return null;

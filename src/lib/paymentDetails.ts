@@ -63,6 +63,39 @@ export const resolvePricingTier = (
 export const getMonthlyPriceForCashiers = (activeCashiers: number): number =>
   getPricingTier(activeCashiers).priceZmw;
 
+export interface ResolvedMonthlyPrice {
+  /** Effective monthly price in ZMW. */
+  priceZmw: number;
+  /** Short label for receipts/notes. */
+  label: string;
+  /** True when the price is 0/negotiated (5+ cashiers or a locked custom deal). */
+  isCustom: boolean;
+  /** True when the price came from the business's grandfathered lock. */
+  locked: boolean;
+}
+
+/**
+ * Resolve what a business actually pays per month. A locked price (set on its
+ * first successful payment, or backfilled by migration) always wins; otherwise
+ * fall back to the admin plan label / active cashier count.
+ */
+export const resolveMonthlyPrice = ({
+  lockedPriceZmw,
+  adminPlanLabel,
+  activeCashiers,
+}: {
+  lockedPriceZmw?: number | null;
+  adminPlanLabel?: string | null;
+  activeCashiers: number;
+}): ResolvedMonthlyPrice => {
+  const locked = lockedPriceZmw !== null && lockedPriceZmw !== undefined ? Number(lockedPriceZmw) : null;
+  if (locked !== null && Number.isFinite(locked)) {
+    return { priceZmw: locked, label: "Locked-in price", isCustom: locked <= 0, locked: true };
+  }
+  const tier = resolvePricingTier(activeCashiers, adminPlanLabel);
+  return { priceZmw: tier.priceZmw, label: tier.label, isCustom: tier.priceZmw <= 0, locked: false };
+};
+
 
 export const buildWhatsAppPaymentLink = (args: {
   paymentCode: string;
