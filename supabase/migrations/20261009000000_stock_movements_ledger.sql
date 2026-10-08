@@ -1,4 +1,4 @@
--- Stock movements ledger + trigger
+﻿-- Stock movements ledger + trigger
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.stock_movements (
@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
   delta integer NOT NULL,
   quantity_after integer NOT NULL,
   movement_type text NOT NULL CHECK (movement_type IN (
-    ''sale'',''sale_return'',''sale_delete'',''delivery_note'',
-    ''adjustment_add'',''adjustment_remove'',''manual_edit'',''import'',
-    ''variant_create'',''product_create'',''restoration'',''other''
+    'sale','sale_return','sale_delete','delivery_note',
+    'adjustment_add','adjustment_remove','manual_edit','import',
+    'variant_create','product_create','restoration','other'
   )),
   reference_type text NULL,
   reference_id uuid NULL,
@@ -24,9 +24,9 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_business_created ON public.stock_
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product_created ON public.stock_movements (product_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_ref ON public.stock_movements (reference_type, reference_id);
 
-COMMENT ON TABLE public.stock_movements IS ''Immutable audit trail of every products.stock change'';
-COMMENT ON COLUMN public.stock_movements.delta IS ''Positive = in, negative = out'';
-COMMENT ON COLUMN public.stock_movements.quantity_after IS ''products.stock value immediately after this change'';
+COMMENT ON TABLE public.stock_movements IS 'Immutable audit trail of every products.stock change';
+COMMENT ON COLUMN public.stock_movements.delta IS 'Positive = in, negative = out';
+COMMENT ON COLUMN public.stock_movements.quantity_after IS 'products.stock value immediately after this change';
 
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 

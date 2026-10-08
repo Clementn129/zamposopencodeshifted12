@@ -1,4 +1,4 @@
--- Trigger to capture stock changes
+﻿-- Trigger to capture stock changes
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.log_stock_change()
@@ -11,7 +11,7 @@ DECLARE
   v_old integer := COALESCE(OLD.stock, 0);
   v_new integer := COALESCE(NEW.stock, 0);
   v_delta integer := v_new - v_old;
-  v_mtype text := ''manual_edit'';
+  v_mtype text := 'manual_edit';
   v_ref_type text := NULL;
   v_ref_id uuid := NULL;
   v_note text := NULL;
@@ -24,8 +24,8 @@ BEGIN
 
   v_actor_id := auth.uid();
 
-  IF TG_NAME = ''on_products_stock_after_update'' THEN
-    v_mtype := ''manual_edit'';
+  IF TG_NAME = 'on_products_stock_after_update' THEN
+    v_mtype := 'manual_edit';
   END IF;
 
   INSERT INTO public.stock_movements (
