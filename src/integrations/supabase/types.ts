@@ -295,6 +295,7 @@ export type Database = {
       businesses: {
         Row: {
           address: string | null
+          allow_backdating: boolean
           allow_cart_price_edit: boolean
           business_type: string
           created_at: string
@@ -327,6 +328,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          allow_backdating?: boolean
           allow_cart_price_edit?: boolean
           business_type?: string
           created_at?: string
@@ -359,6 +361,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          allow_backdating?: boolean
           allow_cart_price_edit?: boolean
           business_type?: string
           created_at?: string
@@ -1887,6 +1890,7 @@ export type Database = {
           adjustment_type: string
           business_id: string
           created_at: string
+          effective_at: string | null
           id: string
           product_id: string
           quantity: number
@@ -1904,6 +1908,7 @@ export type Database = {
           adjustment_type: string
           business_id: string
           created_at?: string
+          effective_at?: string | null
           id?: string
           product_id: string
           quantity: number
@@ -1921,6 +1926,7 @@ export type Database = {
           adjustment_type?: string
           business_id?: string
           created_at?: string
+          effective_at?: string | null
           id?: string
           product_id?: string
           quantity?: number
@@ -1959,6 +1965,69 @@ export type Database = {
           {
             foreignKeyName: "stock_adjustment_requests_variant_id_fkey"
             columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_movements: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          business_id: string
+          created_at: string
+          delta: number
+          effective_at: string | null
+          id: string
+          movement_type: string
+          note: string | null
+          product_id: string
+          quantity_after: number
+          reference_id: string | null
+          reference_type: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          business_id: string
+          created_at?: string
+          delta: number
+          effective_at?: string | null
+          id?: string
+          movement_type: string
+          note?: string | null
+          product_id: string
+          quantity_after: number
+          reference_id?: string | null
+          reference_type?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          business_id?: string
+          created_at?: string
+          delta?: number
+          effective_at?: string | null
+          id?: string
+          movement_type?: string
+          note?: string | null
+          product_id?: string
+          quantity_after?: number
+          reference_id?: string | null
+          reference_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_product_id_fkey"
+            columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
@@ -2095,8 +2164,17 @@ export type Database = {
       }
     }
     Functions: {
+      adjust_product_stock: {
+        Args: {
+          p_delta: number
+          p_effective_at?: string | null
+          p_product_id: string
+          p_reason?: string | null
+        }
+        Returns: undefined
+      }
       approve_stock_adjustment: {
-        Args: { p_note?: string; p_request_id: string }
+        Args: { p_note?: string; p_request_id: string; p_effective_at?: string | null }
         Returns: string
       }
       check_rate_limit: {

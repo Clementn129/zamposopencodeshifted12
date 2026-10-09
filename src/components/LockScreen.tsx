@@ -1,13 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertTriangle, RefreshCw, MessageCircle, Phone, Copy, CheckCircle2, Zap, Loader2 } from 'lucide-react';
+import { AlertTriangle, RefreshCw, MessageCircle, Phone, Copy, CheckCircle2 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { PAYMENT_DETAILS, resolveMonthlyPrice } from '@/lib/paymentDetails';
 import { MonthSelector } from '@/components/MonthSelector';
-import { useLencoRenewal } from '@/hooks/useLencoRenewal';
 import { supabase } from '@/integrations/supabase/client';
 
 interface LockScreenProps {
@@ -41,7 +40,7 @@ const LockScreen = ({ paymentCode, businessId, daysExpired = 0, onRetrySync, isS
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [checking, setChecking] = useState(false);
-  const { role, user } = useAuthContext();
+  const { role } = useAuthContext();
   const isCashier = role === "cashier";
 
   useEffect(() => {
@@ -71,17 +70,6 @@ const LockScreen = ({ paymentCode, businessId, daysExpired = 0, onRetrySync, isS
   });
   const isCustom = tier.priceZmw === 0;
   const amountZmw = isCustom ? 0 : months * tier.priceZmw;
-
-  const { paying, payWithLenco } = useLencoRenewal({
-    businessId,
-    paymentCode,
-    email: user?.email,
-    months,
-    amountZmw,
-    onRenewed: async () => {
-      await onRetrySync();
-    },
-  });
 
   const handleWhatsApp = () => {
     window.open(buildWhatsAppRenewalLink(paymentCode, months, amountZmw), '_blank');
@@ -176,16 +164,6 @@ const LockScreen = ({ paymentCode, businessId, daysExpired = 0, onRetrySync, isS
               </div>
             ) : !submitted ? (
               <>
-
-                <Button
-                  variant="pos"
-                  className="w-full py-5"
-                  onClick={payWithLenco}
-                  disabled={!isOnline || paying}
-                >
-                  {paying ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Processing...</> : <><Zap className="h-4 w-4 mr-1" /> Pay Securely Now</>}
-                </Button>
-
                 <div className="bg-muted rounded-lg p-3 space-y-2">
                   <p className="text-sm font-medium">Manual Payment Details</p>
                   <div className="space-y-1 text-sm">

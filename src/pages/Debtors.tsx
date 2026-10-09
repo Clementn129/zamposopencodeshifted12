@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, Plus, Users, DollarSign, Check, Clock, Trash2, Search, Package } from 'lucide-react';
+import { ArrowLeft, Plus, Users, DollarSign, Check, Clock, Trash2, Search, Package, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import OfflineBanner from '@/components/OfflineBanner';
 import LockScreen from '@/components/LockScreen';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useBusiness } from '@/hooks/useBusiness';
+import { useBackdatePermission } from '@/hooks/useBackdatePermission';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useProducts } from '@/hooks/useProducts';
 import { supabase } from '@/integrations/supabase/client';
@@ -54,6 +55,7 @@ const Debtors = () => {
   const { toast } = useToast();
   const { user, isLoading: authLoading } = useAuthContext();
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } = useBusiness(user?.id);
+  const { canBackdate } = useBackdatePermission();
   const { isLocked } = checkSubscriptionStatus();
   const { isOnline } = useOnlineStatus();
 
@@ -70,6 +72,7 @@ const Debtors = () => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const { activeProducts, isLoading: productsLoading } = useProducts(business?.id);
   const [productSearch, setProductSearch] = useState('');
@@ -221,6 +224,7 @@ const Debtors = () => {
     setCustomerName('');
     setCustomerPhone('');
     setDueDate('');
+    setSaleDate(new Date().toISOString().slice(0, 10));
     setNotes('');
     setProductSearch('');
     setCreditCart([]);
@@ -285,7 +289,11 @@ const Debtors = () => {
 
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      // Back-dating (opt-in): a past date is combined with the current time.
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const now = (canBackdate && saleDate && saleDate < todayIso)
+        ? new Date(`${saleDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+        : new Date().toISOString();
       const offlineId = generateOfflineId();
       const items = creditCart.map(l => ({
         productId: l.productId,
@@ -373,6 +381,7 @@ const Debtors = () => {
             amount_paid: 0,
             status: 'unpaid',
             notes: notes.trim() || null,
+            created_at: now,
           });
 
           if (debtorErr) throw debtorErr;
@@ -717,6 +726,23 @@ const Debtors = () => {
                       <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
                     </div>
                   </div>
+
+                  {canBackdate && (
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-1"><CalendarClock className="h-4 w-4" /> Sale Date</Label>
+                      <Input
+                        type="date"
+                        max={new Date().toISOString().slice(0, 10)}
+                        value={saleDate}
+                        onChange={e => setSaleDate(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {saleDate && saleDate < new Date().toISOString().slice(0, 10)
+                          ? `Recording this credit sale as ${saleDate}. It will appear in that day's report.`
+                          : 'Defaults to today.'}
+                      </p>
+                    </div>
+                  )}
 
                   {/* Product selection */}
                   <div className="border rounded-lg p-3 space-y-2">

@@ -11,11 +11,13 @@ import {
   Plus,
   Search,
   XCircle,
+  CalendarClock,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useCashierPermissions } from "@/hooks/useCashierPermissions";
+import { useBackdatePermission } from "@/hooks/useBackdatePermission";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +44,7 @@ const StockRequests = () => {
   const { business } = useBusiness();
   const { user, role } = useAuthContext();
   const { canAdjustStock } = useCashierPermissions();
+  const { canBackdate } = useBackdatePermission();
 
   const [products, setProducts] = useState<ProductLite[]>([]);
   const [search, setSearch] = useState("");
@@ -52,6 +55,7 @@ const StockRequests = () => {
   const [kind, setKind] = useState<"add" | "remove">("add");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
+  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
 
   const [mine, setMine] = useState<MyRequest[]>([]);
@@ -108,6 +112,7 @@ const StockRequests = () => {
     setKind("add");
     setQty("1");
     setReason("");
+    setEffectiveDate(new Date().toISOString().slice(0, 10));
     setOpen(true);
   };
 
@@ -120,6 +125,11 @@ const StockRequests = () => {
     }
     setSaving(true);
     try {
+      // Back-dating (opt-in): a past date is combined with the current time.
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const effectiveIso = (canBackdate && effectiveDate && effectiveDate < todayIso)
+        ? new Date(`${effectiveDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+        : null;
       const { error } = await supabase.from("stock_adjustment_requests").insert({
         business_id: business.id,
         product_id: target.id,
@@ -129,6 +139,7 @@ const StockRequests = () => {
         adjustment_type: kind,
         quantity: amount,
         reason: reason.trim() || null,
+        effective_at: effectiveIso,
       });
       if (error) throw error;
       toast({
@@ -328,6 +339,26 @@ const StockRequests = () => {
                 placeholder={kind === "add" ? "Delivery from supplier" : "Damaged / expired"}
               />
             </div>
+
+            {canBackdate && (
+              <div className="space-y-1.5">
+                <Label htmlFor="stock-date" className="flex items-center gap-1">
+                  <CalendarClock className="h-4 w-4" /> Date
+                </Label>
+                <Input
+                  id="stock-date"
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {effectiveDate && effectiveDate < new Date().toISOString().slice(0, 10)
+                    ? `Back-dated to ${effectiveDate}. The owner can change it before approving.`
+                    : "Defaults to today."}
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

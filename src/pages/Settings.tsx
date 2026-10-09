@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -71,6 +71,8 @@ const Settings = () => {
   const [capexSaving, setCapexSaving] = useState(false);
   const [allowCartPriceEdit, setAllowCartPriceEdit] = useState(false);
   const [allowCartPriceEditSaving, setAllowCartPriceEditSaving] = useState(false);
+  const [allowBackdating, setAllowBackdating] = useState(false);
+  const [allowBackdatingSaving, setAllowBackdatingSaving] = useState(false);
 
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
@@ -219,6 +221,48 @@ const Settings = () => {
     }
   };
 
+  const handleBackdatingChange = async (enabled: boolean) => {
+    if (!business?.id) return;
+    const previous = allowBackdating;
+    setAllowBackdating(enabled);
+    setAllowBackdatingSaving(true);
+    const updates = {
+      allow_backdating: enabled,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Saved offline', description: 'The back-dating setting will sync when connected.' });
+        return;
+      }
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+      toast({
+        title: enabled ? 'Back-dating on' : 'Back-dating off',
+        description: enabled
+          ? 'Staff can set a past date on sales and stock adjustments.'
+          : 'Dates are locked to today.',
+      });
+      await refetch();
+    } catch (e) {
+      setAllowBackdating(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save this setting',
+      });
+    } finally {
+      setAllowBackdatingSaving(false);
+    }
+  };
+
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
     if (!business?.id || !isOnline) return;
@@ -263,6 +307,7 @@ const Settings = () => {
       setPreventNeg(business.preventNegativeStock !== false);
       setCapexEnabled(business.capexEnabled === true);
       setAllowCartPriceEdit(business.allowCartPriceEdit === true);
+      setAllowBackdating(business.allowBackdating === true);
     }
   }, [business]);
 
@@ -766,6 +811,40 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground">
                 Off by default. Leave it off unless staff routinely sell at a negotiated price —
                 an open price box lets anyone change what a customer is charged.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Back-dating */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><CalendarClock className="h-5 w-5" /> Back-dating</CardTitle>
+              <CardDescription>
+                Lets staff set a past date on sales and stock adjustments instead of always using today.
+                Cashiers also need their own Back-date switch turned on in Staff.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                <div>
+                  <Label htmlFor="allow-backdating">Allow back-dating</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {allowBackdating
+                      ? 'ON — owners and managers can back-date. Cashiers need Back-date switched on in Staff.'
+                      : 'OFF — every sale and stock change is stamped with today.'}
+                  </p>
+                </div>
+                <Switch
+                  id="allow-backdating"
+                  checked={allowBackdating}
+                  disabled={allowBackdatingSaving}
+                  onCheckedChange={handleBackdatingChange}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Off by default. Owners and managers inherit this switch; each cashier needs their
+                own Back-date toggle in Staff. Back-dated entries appear in the period you choose, so
+                only turn this on where the books genuinely need correcting for past days.
               </p>
             </CardContent>
           </Card>

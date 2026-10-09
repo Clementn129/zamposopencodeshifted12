@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { CheckCircle2, XCircle, Loader2, ClipboardList } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, ClipboardList, CalendarClock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ type Request = {
   quantity: number;
   reason: string | null;
   created_at: string;
+  effective_at: string | null;
 };
 
 type ProductLite = { id: string; name: string };
@@ -31,11 +32,12 @@ const PendingStockRequests = ({ businessId, products, onApproved }: Props) => {
   const [requests, setRequests] = useState<Request[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [dates, setDates] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const { data } = await supabase
       .from("stock_adjustment_requests")
-      .select("id, product_id, variant_id, requester_name, adjustment_type, quantity, reason, created_at")
+      .select("id, product_id, variant_id, requester_name, adjustment_type, quantity, reason, created_at, effective_at")
       .eq("business_id", businessId)
       .eq("status", "pending")
       .order("created_at", { ascending: false });
@@ -53,10 +55,16 @@ const PendingStockRequests = ({ businessId, products, onApproved }: Props) => {
     setBusy(id);
     try {
       const fn = approve ? "approve_stock_adjustment" : "reject_stock_adjustment";
-      const { error } = await supabase.rpc(fn, {
-        p_request_id: id,
-        p_note: notes[id] || null,
-      });
+      const req = requests.find((r) => r.id === id);
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const chosen = dates[id] ?? (req?.effective_at ? req.effective_at.slice(0, 10) : "");
+      // Owner-editable back-date; a future date is ignored (falls back to now()).
+      const effectiveIso = approve && chosen && chosen < todayIso
+        ? new Date(`${chosen}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+        : null;
+      const args: Record<string, unknown> = { p_request_id: id, p_note: notes[id] || null };
+      if (approve) args.p_effective_at = effectiveIso;
+      const { error } = await (supabase.rpc as any)(fn, args);
       if (error) throw error;
       toast({ title: approve ? "Approved" : "Rejected" });
       await load();
@@ -109,6 +117,16 @@ const PendingStockRequests = ({ businessId, products, onApproved }: Props) => {
               </Badge>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={dates[r.id] ?? (r.effective_at ? r.effective_at.slice(0, 10) : new Date().toISOString().slice(0, 10))}
+                  onChange={(e) => setDates((d) => ({ ...d, [r.id]: e.target.value }))}
+                  className="h-8 text-xs w-[150px]"
+                />
+              </div>
               <Input
                 placeholder="Note (optional)"
                 value={notes[r.id] ?? ""}

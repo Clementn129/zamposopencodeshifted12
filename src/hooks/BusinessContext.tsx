@@ -53,6 +53,8 @@ export interface Business {
   capexEnabled: boolean;
   /** Allow a cashier to override a line's unit price in the POS cart. Absent/undefined must be treated as `false`. */
   allowCartPriceEdit: boolean;
+  /** Allow staff to back-date sales and stock adjustments. Absent/undefined must be treated as `false`. */
+  allowBackdating: boolean;
 }
 
 export interface BusinessGroupEntry {
@@ -111,6 +113,8 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
   capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
   // Strict `=== true`: cart price editing is opt-in and off by default.
   allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
+  // Strict `=== true`: back-dating is opt-in and off by default.
+  allowBackdating: (row as unknown as Record<string, unknown>).allow_backdating === true,
 });
 
 const isElectronBiz = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
@@ -187,6 +191,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       preventNegativeStock: (row as unknown as Record<string, unknown>).prevent_negative_stock !== false,
       capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
       allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
+      allowBackdating: (row as unknown as Record<string, unknown>).allow_backdating === true,
     }, user?.id);
   }, [user?.id]);
 
@@ -229,6 +234,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         preventNegativeStock: cachedBiz.preventNegativeStock !== false,
         capexEnabled: cachedBiz.capexEnabled === true,
         allowCartPriceEdit: cachedBiz.allowCartPriceEdit === true,
+        allowBackdating: cachedBiz.allowBackdating === true,
       });
       // A cached row is real, paintable business state: stop gating pages on
       // the network waterfall while fetchAll reconciles with the server.
@@ -263,6 +269,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       preventNegativeStock: true,
       capexEnabled: false,
       allowCartPriceEdit: false,
+      allowBackdating: false,
     });
     setIsLoading(false);
     clearLoadingTimer();

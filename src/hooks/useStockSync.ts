@@ -40,9 +40,31 @@ export function useStockSync(businessId: string | undefined, preventNegativeStoc
       const unsynced = await getUnsyncedStockUpdates(businessId);
       setPendingCount(unsynced.length);
 
+      // Back-dated updates carry their own occurrence time and must not be
+      // netted together. Replay each through the RPC so the ledger keeps the
+      // exact past date. Non-dated updates keep the original netted path.
+      const dated = unsynced.filter((u) => !!u.effectiveAt);
+      const undated = unsynced.filter((u) => !u.effectiveAt);
+
+      for (const update of dated) {
+        try {
+          const { error } = await (supabase.rpc as any)("adjust_product_stock", {
+            p_product_id: update.productId,
+            p_delta: update.stockChange,
+            p_reason: null,
+            p_effective_at: update.effectiveAt,
+          });
+          if (error) throw error;
+          await markStockUpdateAsSynced(update.id);
+          syncedCount += 1;
+        } catch (e) {
+          console.error(`Error syncing back-dated stock for product ${update.productId}:`, e);
+        }
+      }
+
       const productChanges: Record<string, { netChange: number; updateIds: string[] }> = {};
 
-      for (const update of unsynced) {
+      for (const update of undated) {
         if (!productChanges[update.productId]) {
           productChanges[update.productId] = { netChange: 0, updateIds: [] };
         }

@@ -18,6 +18,7 @@ import {
   LayoutGrid,
   Boxes,
   ChefHat,
+  CalendarClock,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,7 @@ import MenuModifiersManager from "@/components/MenuModifiersManager";
 import DiningTablesManager from "@/components/DiningTablesManager";
 import IngredientsManager from "@/components/IngredientsManager";
 import DishRecipeDialog from "@/components/DishRecipeDialog";
+import RecipeEditor, { type DraftRecipeLine } from "@/components/RecipeEditor";
 import { useAuthContext } from "@/contexts/AuthContext";
 import PendingStockRequests from "@/components/PendingStockRequests";
 
@@ -64,6 +66,7 @@ import { useStockSync } from "@/hooks/useStockSync";
 import { useBusinessType } from "@/hooks/useBusinessType";
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { useCashierPermissions } from "@/hooks/useCashierPermissions";
+import { useBackdatePermission } from "@/hooks/useBackdatePermission";
 import { supabase } from "@/integrations/supabase/client";
 import {
   saveOfflineStockUpdate,
@@ -93,6 +96,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
 
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } =
     useBusiness(user?.id);
+  const { canBackdate } = useBackdatePermission();
 
   const { isLocked } = checkSubscriptionStatus();
   const { products, isLoading: productsLoading, error, isOnline, refetch } = useProducts(business?.id);
@@ -121,6 +125,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState("");
   const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
+  const [adjustDate, setAdjustDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -147,6 +152,12 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [itemType, setItemType] = useState<"product" | "service">(isService ? "service" : "product");
   const [trackExpiry, setTrackExpiry] = useState(false);
   const [expiryDate, setExpiryDate] = useState("");
+
+  // Dish / recipe state for the product dialog (restaurant, non-variant only).
+  const [isDish, setIsDish] = useState(false);
+  const [recipeLines, setRecipeLines] = useState<DraftRecipeLine[]>([]);
+  const [recipeLoadFailed, setRecipeLoadFailed] = useState(false);
+  const [loadingRecipe, setLoadingRecipe] = useState(false);
 
   // New-category input inside the "Manage categories" dialog
   const [pendingNewCategory, setPendingNewCategory] = useState("");
@@ -241,6 +252,9 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setItemType(isService ? "service" : "product");
     setTrackExpiry(false);
     setExpiryDate("");
+    setIsDish(false);
+    setRecipeLines([]);
+    setRecipeLoadFailed(false);
     setEditing(null);
   };
 
@@ -268,6 +282,48 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setExpiryDate(p.expiryDate ?? "");
     setOpen(true);
   };
+
+  // Load an existing dish's recipe when the edit dialog opens. A failed load
+  // blocks recipe saving so we never wipe a recipe we could not read.
+  useEffect(() => {
+    if (!open || !business?.id) return;
+    if (!editing) {
+      setIsDish(false);
+      setRecipeLines([]);
+      setRecipeLoadFailed(false);
+      return;
+    }
+    setIsDish(editing.isDish === true);
+    setRecipeLoadFailed(false);
+    if (!editing.isDish || !isOnline) {
+      setRecipeLines([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingRecipe(true);
+    supabase
+      .from("recipe_ingredients")
+      .select("ingredient_id, quantity")
+      .eq("business_id", business.id)
+      .eq("product_id", editing.id)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn("recipe load error", error.message);
+          setRecipeLines([]);
+          setRecipeLoadFailed(true);
+          return;
+        }
+        setRecipeLines(
+          (data ?? []).map((r) => ({ ingredientId: r.ingredient_id, quantity: Number(r.quantity) || 0 })),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRecipe(false);
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.id, editing?.isDish, business?.id, isOnline]);
 
   const resolveCategoryValue = async (): Promise<string | null> => {
     if (category === NEW_CAT_VALUE) {
@@ -316,6 +372,15 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
       const resolvedItemType = isHybrid ? itemType : isService ? "service" : "product";
       const isServiceItem = resolvedItemType === "service";
 
+      // The recipe editor only appears for restaurant, non-variant products.
+      // Only then do we let this save own is_dish / track_stock.
+      const recipeSectionActive =
+        isRestaurant &&
+        !isCashier &&
+        resolvedItemType !== "service" &&
+        !editing?.parentId &&
+        (!editing || !(variantsByParent[editing.id]?.length));
+
       const payload = {
         name: name.trim(),
         price: priceNum,
@@ -334,19 +399,56 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
         ...(editing
           ? { track_stock: (isServiceItem ? 0 : stockNum) !== editing.stock || editing.trackStock !== false }
           : {}),
+        // A dish is never stock-counted itself — its ingredients carry the stock.
+        ...(recipeSectionActive
+          ? { is_dish: isDish, ...(isDish ? { track_stock: false } : {}) }
+          : {}),
       };
 
+      let createdId: string | null = null;
       if (isOnline) {
         if (editing) {
           const { error } = await supabase.from("products").update(payload).eq("id", editing.id);
           if (error) throw error;
           toast({ title: "Updated" });
         } else {
-          const { error } = await supabase
+          const { data: newRow, error } = await supabase
             .from("products")
-            .insert({ business_id: business.id, is_active: true, ...payload });
+            .insert({ business_id: business.id, is_active: true, ...payload })
+            .select("id")
+            .single();
           if (error) throw error;
+          createdId = newRow?.id ?? null;
           toast({ title: "Created" });
+        }
+
+        // Save the recipe once the product exists. Toggling the dish flag off
+        // keeps existing lines inert rather than deleting them; a load failure
+        // never wipes a recipe we could not read.
+        if (recipeSectionActive && isDish) {
+          const productId = editing ? editing.id : createdId;
+          if (recipeLoadFailed) {
+            toast({ title: "Recipe left unchanged", description: "The existing recipe could not be loaded." });
+          } else if (productId) {
+            const validLines = recipeLines.filter((l) => l.ingredientId && l.quantity > 0);
+            const { error: delErr } = await supabase
+              .from("recipe_ingredients")
+              .delete()
+              .eq("business_id", business.id)
+              .eq("product_id", productId);
+            if (delErr) throw delErr;
+            if (validLines.length > 0) {
+              const { error: insErr } = await supabase.from("recipe_ingredients").insert(
+                validLines.map((l) => ({
+                  business_id: business.id,
+                  product_id: productId,
+                  ingredient_id: l.ingredientId,
+                  quantity: l.quantity,
+                })),
+              );
+              if (insErr) throw insErr;
+            }
+          }
         }
       } else {
         // Offline: save to local cache and queue for sync
@@ -417,6 +519,12 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
           toast({ title: "Created (offline)" });
         }
         await cacheProducts(cached);
+        if (recipeSectionActive && isDish) {
+          toast({
+            title: "Recipe not saved offline",
+            description: "Connect and save again to store this dish's recipe.",
+          });
+        }
       }
 
       setOpen(false);
@@ -493,6 +601,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setSelectedProduct(p);
     setStockAdjustment("");
     setAdjustmentType("add");
+    setAdjustDate(new Date().toISOString().slice(0, 10));
     setStockAdjustOpen(true);
   };
 
@@ -508,6 +617,13 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     const newStock = business.preventNegativeStock === false
       ? selectedProduct.stock + stockChange
       : Math.max(0, selectedProduct.stock + stockChange);
+
+    // Back-dating (opt-in): a past date is combined with the current time.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const backdated = canBackdate && !!adjustDate && adjustDate < todayIso;
+    const effectiveIso = backdated
+      ? new Date(`${adjustDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+      : null;
 
     setSaving(true);
     try {
@@ -532,6 +648,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
           requester_name: user.email ?? null,
           adjustment_type: adjustmentType,
           quantity: adjustmentValue,
+          effective_at: effectiveIso,
         });
         if (error) throw error;
         toast({
@@ -544,11 +661,22 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
       }
 
       if (isOnline) {
-        const { error } = await supabase
-          .from("products")
-          .update({ stock: newStock })
-          .eq("id", selectedProduct.id);
-        if (error) throw error;
+        if (canBackdate) {
+          // Route through the RPC so the movement carries its effective date.
+          const { error } = await supabase.rpc("adjust_product_stock", {
+            p_product_id: selectedProduct.id,
+            p_delta: stockChange,
+            p_reason: null,
+            p_effective_at: effectiveIso,
+          });
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from("products")
+            .update({ stock: newStock })
+            .eq("id", selectedProduct.id);
+          if (error) throw error;
+        }
         toast({
           title: "Stock updated",
           description: `${selectedProduct.name}: ${selectedProduct.stock} → ${newStock}`,
@@ -560,6 +688,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
           businessId: business.id,
           stockChange,
           createdAt: new Date().toISOString(),
+          effectiveAt: effectiveIso,
           synced: false,
         });
         await updateCachedProductStock(selectedProduct.id, newStock);
@@ -1454,6 +1583,24 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
               </Select>
             </div>
 
+            {/* Dish / recipe — restaurant, non-variant products only */}
+            {business?.id &&
+              isRestaurant &&
+              !isCashier &&
+              itemType !== "service" &&
+              !editing?.parentId &&
+              (!editing || !(variantsByParent[editing.id]?.length)) && (
+                <RecipeEditor
+                  businessId={business.id}
+                  isDish={isDish}
+                  onDishChange={setIsDish}
+                  lines={recipeLines}
+                  onLinesChange={setRecipeLines}
+                  disabled={saving}
+                  loading={loadingRecipe}
+                />
+              )}
+
             {/* Variants — only for products (not services), on the top-level row */}
             {itemType !== "service" && editing && !editing.parentId && (
               <VariantsManager
@@ -1628,6 +1775,24 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                 placeholder="Enter amount"
               />
             </div>
+            {canBackdate && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1">
+                  <CalendarClock className="h-4 w-4" /> Date
+                </Label>
+                <Input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={adjustDate}
+                  onChange={(e) => setAdjustDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {adjustDate && adjustDate < new Date().toISOString().slice(0, 10)
+                    ? `Recording this stock change on ${adjustDate}.`
+                    : "Defaults to today."}
+                </p>
+              </div>
+            )}
             <p className="text-sm text-muted-foreground text-center">
               New stock:{" "}
               {Math.max(

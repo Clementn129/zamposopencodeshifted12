@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes, ChefHat } from "lucide-react";
+import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes, ChefHat, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import MenuModifierPicker, { ModifierPick } from "@/components/MenuModifierPicke
 import QuickAddProduct from "@/components/QuickAddProduct";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
+import { useBackdatePermission } from "@/hooks/useBackdatePermission";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { useProducts, Product } from "@/hooks/useProducts";
 import { useSyncStatus } from "@/contexts/SyncStatusContext";
@@ -71,6 +72,7 @@ const Pos = () => {
   const { toast } = useToast();
   const { user, isLoading: authLoading, role, signOut } = useAuthContext();
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } = useBusiness(user?.id);
+  const { canBackdate } = useBackdatePermission();
   const { isLocked } = checkSubscriptionStatus();
 
   const [cashierName, setCashierName] = useState<string | null>(null);
@@ -125,6 +127,7 @@ const Pos = () => {
   const [paymentMode, setPaymentMode] = useState<"full" | "partial" | "credit">("full");
   const [partialAmount, setPartialAmount] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerTpin, setCustomerTpin] = useState("");
@@ -550,6 +553,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     setPaymentMode("full");
     setPartialAmount("");
     setDueDate("");
+    setSaleDate(new Date().toISOString().slice(0, 10));
     setCustomerName("");
     setCustomerPhone("");
     setCustomerTpin("");
@@ -633,7 +637,12 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     setIsProcessing(true);
 
     const saleId = generateOfflineId();
-    const createdAt = new Date().toISOString();
+    // Back-dating (opt-in): a past date is combined with the current time so the
+    // sale sorts correctly within that day. Today or future falls back to now().
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const createdAt = (canBackdate && saleDate && saleDate < todayIso)
+      ? new Date(`${saleDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+      : new Date().toISOString();
     const tax = taxBreakdown;
 
     const salePayload = {
@@ -1180,9 +1189,9 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
             </TabsList>
 
             <TabsContent value="sale">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader className="pb-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:h-[calc(100dvh-11rem)] md:min-h-0">
+                <Card className="flex flex-col min-h-0">
+                  <CardHeader className="pb-2 shrink-0">
                     <CardTitle className="text-lg flex items-center gap-2">
                       {isService ? <Briefcase className="h-4 w-4" /> : null}
                       {labels.posItemsTitle}
@@ -1209,7 +1218,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                       <Plus className="h-4 w-4 mr-2" /> Quick sale — add a new item
                     </Button>
                   </CardHeader>
-                  <CardContent className="space-y-3 max-h-[50vh] sm:max-h-[60vh] overflow-y-auto">
+                  <CardContent className="space-y-3 overflow-y-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-none md:flex-1 md:min-h-0">
                     {Object.keys(groupedProducts).length === 0 ? (
                       <p className="text-sm text-muted-foreground">
                         {searchQuery ? `No ${isService ? 'services' : 'products'} match your search.` : labels.noItemsMessage}
@@ -1254,9 +1263,9 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader><CardTitle className="text-lg">{isService ? 'Invoice' : 'Cart'}</CardTitle><CardDescription>{isService ? 'Complete transaction' : 'Complete sale'}</CardDescription></CardHeader>
-                  <CardContent className="space-y-3">
+                <Card className="flex flex-col min-h-0">
+                  <CardHeader className="shrink-0"><CardTitle className="text-lg">{isService ? 'Invoice' : 'Cart'}</CardTitle><CardDescription>{isService ? 'Complete transaction' : 'Complete sale'}</CardDescription></CardHeader>
+                  <CardContent className="space-y-3 md:flex-1 md:min-h-0 md:overflow-y-auto">
                     {cart.length === 0 ? <p className="text-sm text-muted-foreground">{isService ? 'No services added.' : 'Cart empty.'}</p> : cart.map((l) => (
                       <div key={l.lineId} className="bg-secondary rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
@@ -1481,10 +1490,32 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                           )}
                         </div>
 
+                        {/* Back-dating (opt-in). Never allows a future date. */}
+                        {canBackdate && (
+                          <div className="border-t pt-3 space-y-2">
+                            <Label className="text-sm flex items-center gap-1">
+                              <CalendarClock className="h-4 w-4" /> Sale Date
+                            </Label>
+                            <Input
+                              type="date"
+                              max={new Date().toISOString().slice(0, 10)}
+                              value={saleDate}
+                              onChange={(e) => setSaleDate(e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {saleDate && saleDate < new Date().toISOString().slice(0, 10)
+                                ? `Recording this sale as ${saleDate}. It will appear in that day's report.`
+                                : "Defaults to today."}
+                            </p>
+                          </div>
+                        )}
+
                       </>
                     )}
 
-                    <div className="border-t pt-3 space-y-1">
+                    {/* Checkout details stay in the scroll area; the total and
+                        actions below are pinned so they are always reachable. */}
+                    <div className="space-y-1 border-t pt-3">
                       {taxBreakdown && taxBreakdown.taxAmount > 0 ? (
                         <>
                           <div className="flex justify-between text-sm">
@@ -1508,10 +1539,6 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                           <span>-ZMW {discountAmount.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">Total</span>
-                        <span className="text-lg font-bold">ZMW {total.toFixed(2)}</span>
-                      </div>
                     </div>
 
                     <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
@@ -1545,6 +1572,15 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                       </div>
                     )}
 
+                  </CardContent>
+
+                  {/* Pinned checkout bar — total + actions stay visible without
+                      scrolling the cart. */}
+                  <div className="shrink-0 space-y-3 border-t bg-card px-6 pb-4 pt-3">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Total</span>
+                      <span className="text-lg font-bold">ZMW {total.toFixed(2)}</span>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <Button variant="outline" onClick={clear} disabled={!cart.length || isProcessing}>Clear</Button>
                       <Button variant="pos" onClick={completeSale} disabled={!cart.length || isProcessing}>
@@ -1552,7 +1588,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                       </Button>
                     </div>
                     {!isOnline && <p className="text-xs text-muted-foreground">Offline mode: sales saved locally.</p>}
-                  </CardContent>
+                  </div>
                 </Card>
               </div>
             </TabsContent>

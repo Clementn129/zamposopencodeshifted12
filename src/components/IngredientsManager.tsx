@@ -16,7 +16,7 @@ interface Props {
 
 const IngredientsManager = ({ businessId, recipes = [] }: Props) => {
   const { toast } = useToast();
-  const { ingredients, isLoading, createIngredient, updateIngredient, deleteIngredient, restock } = useIngredients(businessId);
+  const { ingredients, isLoading, loadError, createIngredient, updateIngredient, deleteIngredient, restock } = useIngredients(businessId);
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");

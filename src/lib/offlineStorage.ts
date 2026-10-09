@@ -61,6 +61,8 @@ interface OfflineStockUpdate {
   businessId: string;
   stockChange: number; // positive for add, negative for subtract
   createdAt: string;
+  /** Optional back-dated occurrence time; absent for normal (now-stamped) changes. */
+  effectiveAt?: string | null;
   synced: boolean;
 }
 
@@ -124,6 +126,8 @@ interface CachedBusiness {
   capexEnabled?: boolean;
   /** Allow overriding a line's unit price in the POS cart; absent = off. */
   allowCartPriceEdit?: boolean;
+  /** Allow back-dating sales and stock adjustments; absent = off. */
+  allowBackdating?: boolean;
   cachedForUser?: string;
   /** Absent on older caches -> tie-break falls back to store key order. */
   lastUsedAt?: number;

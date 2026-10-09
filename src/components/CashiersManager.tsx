@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, KeyRound, Power, Trash2, Users, PackagePlus } from 'lucide-react';
+import { Loader2, Plus, KeyRound, Power, Trash2, Users, PackagePlus, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,7 @@ interface Cashier {
   created_at: string;
   role: string;
   can_adjust_stock: boolean;
+  can_backdate: boolean;
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -59,8 +60,10 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
   const [newPin, setNewPin] = useState('');
   const [newRole, setNewRole] = useState('cashier');
   const [newStockAccess, setNewStockAccess] = useState(false);
+  const [newBackdate, setNewBackdate] = useState(false);
   // False until the migration lands. The toggles hide rather than lie.
   const [stockAccessAvailable, setStockAccessAvailable] = useState(true);
+  const [backdateAvailable, setBackdateAvailable] = useState(false);
 
   // Reset PIN dialog
   const [resetTarget, setResetTarget] = useState<Cashier | null>(null);
@@ -77,7 +80,7 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     setLoading(true);
 
     const LEGACY_COLUMNS = 'id, username, display_name, is_active, last_login_at, created_at, role';
-    const RICH_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock`;
+    const RICH_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock, can_backdate`;
 
     const { data, error } = await supabase
       .from('business_cashiers')
@@ -86,8 +89,31 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       .order('created_at', { ascending: true });
 
     if (error && MISSING_COLUMN_RE.test(error.message)) {
-      // Un-migrated database. Load the legacy shape so the page still works;
-      // the stock toggle stays hidden rather than silently claiming OFF.
+      // The back-dating migration may not have landed yet. Fall back to the
+      // stock column alone so that toggle keeps working, and hide only the
+      // back-dating toggle instead of claiming it is OFF.
+      const { data: stockOnly, error: stockErr } = await supabase
+        .from('business_cashiers')
+        .select(`${LEGACY_COLUMNS}, can_adjust_stock`)
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: true });
+
+      if (!stockErr) {
+        setStockAccessAvailable(true);
+        setBackdateAvailable(false);
+        setCashiers(
+          ((stockOnly ?? []) as unknown as Cashier[]).map((c) => ({
+            ...c,
+            can_adjust_stock: c.can_adjust_stock === true,
+            can_backdate: false,
+          })),
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Neither optional column exists. Load the legacy shape so the page still
+      // works; both toggles stay hidden rather than silently claiming OFF.
       const { data: legacy, error: legacyErr } = await supabase
         .from('business_cashiers')
         .select(LEGACY_COLUMNS)
@@ -99,8 +125,9 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
         return;
       }
       setStockAccessAvailable(false);
+      setBackdateAvailable(false);
       setCashiers(
-        ((legacy ?? []) as unknown as Cashier[]).map((c) => ({ ...c, can_adjust_stock: false })),
+        ((legacy ?? []) as unknown as Cashier[]).map((c) => ({ ...c, can_adjust_stock: false, can_backdate: false })),
       );
       setLoading(false);
       return;
@@ -116,11 +143,13 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       }
     } else {
       setStockAccessAvailable(true);
+      setBackdateAvailable(true);
       setCashiers(
         ((data ?? []) as unknown as Cashier[]).map((c) => ({
           ...c,
           // Explicit `=== true`: an absent/null value must read as OFF.
           can_adjust_stock: c.can_adjust_stock === true,
+          can_backdate: c.can_backdate === true,
         })),
       );
     }
@@ -178,16 +207,31 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     if (!requireOnline()) return;
     setBusy(true);
     try {
-      await callFn('create', {
+      const created = await callFn('create', {
         username,
         pin: newPin,
         display_name: newName.trim() || null,
         role: newRole,
         can_adjust_stock: stockAccessAvailable ? newStockAccess : false,
       });
+      // manage-cashier does not carry can_backdate. Apply it with a direct
+      // owner-scoped update so the new grant does not depend on an edge-function
+      // redeploy. Failure is non-fatal: the cashier exists and the toggle can be
+      // flipped later.
+      if (backdateAvailable && newBackdate) {
+        const cashierId = (created as { cashier?: { id?: string } } | null)?.cashier?.id;
+        if (cashierId) {
+          const { error: bdErr } = await supabase
+            .from('business_cashiers')
+            .update({ can_backdate: true })
+            .eq('id', cashierId)
+            .eq('business_id', businessId);
+          if (bdErr) console.warn('Could not set back-dating grant on create:', bdErr.message);
+        }
+      }
       toast({ title: 'Staff added', description: `${username} can now sign in with their PIN.` });
       setCreateOpen(false);
-      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier'); setNewStockAccess(false);
+      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier'); setNewStockAccess(false); setNewBackdate(false);
       await fetchCashiers();
     } catch (e) {
       toast({ variant: 'destructive', title: 'Could not add cashier', description: e instanceof Error ? e.message : 'Unknown error' });
@@ -264,8 +308,37 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     }
   };
 
+  const handleToggleBackdate = async (c: Cashier) => {
+    if (!requireOnline()) return;
+    const next = !c.can_backdate;
+    setBusy(true);
+    // Optimistic so the switch feels instant, rolled back on failure.
+    setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_backdate: next } : x));
+    try {
+      // Direct owner-scoped update keeps the toggle independent of the
+      // manage-cashier edge function, which does not know this column.
+      const { error } = await supabase
+        .from('business_cashiers')
+        .update({ can_backdate: next })
+        .eq('id', c.id)
+        .eq('business_id', businessId);
+      if (error) throw error;
+      await fetchCashiers();
+      toast({
+        title: next ? 'Back-dating allowed' : 'Back-dating removed',
+        description: next
+          ? `${c.display_name || c.username} can now save sales on a past date.`
+          : `${c.display_name || c.username} can no longer back-date sales.`,
+      });
+    } catch (e) {
+      setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_backdate: c.can_backdate } : x));
+      toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDelete = async (c: Cashier) => {
-    if (!confirm(`Delete cashier "${c.username}"? This cannot be undone.`)) return;
     if (!requireOnline()) return;
     setBusy(true);
     try {
@@ -332,6 +405,20 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                       />
                       <Label htmlFor={`stock-access-${c.id}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
                         <PackagePlus className="h-3.5 w-3.5 inline mr-1" />Stock access
+                      </Label>
+                    </div>
+                  )}
+                  {backdateAvailable && (
+                    <div className="flex items-center gap-2 mr-2">
+                      <Switch
+                        id={`backdate-${c.id}`}
+                        checked={c.can_backdate}
+                        disabled={busy}
+                        onCheckedChange={() => handleToggleBackdate(c)}
+                        aria-label={`Allow back-dating for ${c.username}`}
+                      />
+                      <Label htmlFor={`backdate-${c.id}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                        <CalendarClock className="h-3.5 w-3.5 inline mr-1" />Back-date
                       </Label>
                     </div>
                   )}
@@ -405,6 +492,21 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                   id="c-stock-access"
                   checked={newStockAccess}
                   onCheckedChange={setNewStockAccess}
+                />
+              </div>
+            )}
+            {backdateAvailable && (
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                <Label htmlFor="c-backdate" className="flex-1 text-sm">
+                  <span className="font-medium">Allow back-dating</span>
+                  <span className="block text-xs text-muted-foreground">
+                    They may save sales against a past date. The business back-dating switch must also be on.
+                  </span>
+                </Label>
+                <Switch
+                  id="c-backdate"
+                  checked={newBackdate}
+                  onCheckedChange={setNewBackdate}
                 />
               </div>
             )}

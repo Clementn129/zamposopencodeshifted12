@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { ArrowLeft, CreditCard, MessageCircle, Phone, Copy, Users, CheckCircle2, Zap, Loader2 } from "lucide-react";
+import { ArrowLeft, CreditCard, MessageCircle, Phone, Copy, Users, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,6 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useToast } from "@/hooks/use-toast";
 import { PAYMENT_DETAILS, resolveMonthlyPrice } from "@/lib/paymentDetails";
 import { MonthSelector } from "@/components/MonthSelector";
-import { useLencoRenewal } from "@/hooks/useLencoRenewal";
 import { supabase } from "@/integrations/supabase/client";
 
 const buildWhatsAppRenewalLink = (paymentCode: string, months: number, amount: number, cashiers: number) => {
@@ -63,15 +62,6 @@ const Subscription = () => {
   );
   const isCustom = tier.priceZmw === 0;
   const amountZmw = isCustom ? 0 : months * tier.priceZmw;
-
-  const { paying, payWithLenco } = useLencoRenewal({
-    businessId: business?.id,
-    paymentCode: business?.paymentCode,
-    email: user?.email,
-    months,
-    amountZmw,
-    onRenewed: refetch,
-  });
 
   const handleManualPayment = useCallback(async () => {
     if (!business?.id) return;
@@ -205,15 +195,6 @@ const Subscription = () => {
 
               {!submitted ? (
                 <>
-                  <Button
-                    variant="pos"
-                    className="w-full text-lg py-6"
-                    onClick={payWithLenco}
-                    disabled={!isOnline || paying}
-                  >
-                    {paying ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Processing...</> : <><Zap className="h-4 w-4 mr-1" /> Pay Securely Now</>}
-                  </Button>
-
                   <div className="bg-muted rounded-lg p-4 space-y-3">
                     <p className="text-sm font-medium">Manual Payment Details</p>
                     <div className="space-y-2 text-sm">
