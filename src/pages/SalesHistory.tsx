@@ -939,6 +939,7 @@ const SalesHistory = () => {
 
       <EditSaleModal 
         sale={editingSale} 
+        businessId={business.id}
         onClose={() => setEditingSale(null)} 
         onUpdated={fetchData} 
       />

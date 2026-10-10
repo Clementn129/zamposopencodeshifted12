@@ -296,7 +296,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                         stock: preventNegativeStock === false
                           ? Number(op.payload.stock || 0) - totalQty
                           : Math.max(0, Number(op.payload.stock || 0) - totalQty),
-                      }).eq('id', newProductId);
+                      }).eq('id', newProductId).eq('business_id', businessId);
                     }
                   }
                 } catch {
@@ -324,7 +324,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
                 track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
                 expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
-              }).eq('id', op.payload.productId);
+              }).eq('id', op.payload.productId).eq('business_id', businessId);
               if (updateErr) throw updateErr;
               await clearResolvedPendingImage(op.payload.image_url);
               processed.push(op.id);
@@ -332,7 +332,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'product_deactivate': {
-              const { error: deactivateErr } = await supabase.from('products').update({ is_active: false }).eq('id', op.payload.productId);
+              const { error: deactivateErr } = await supabase.from('products').update({ is_active: false }).eq('id', op.payload.productId).eq('business_id', businessId);
               if (deactivateErr) throw deactivateErr;
               processed.push(op.id);
               break;
@@ -358,7 +358,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'expense_delete': {
-              const { error: expDelErr } = await supabase.from('expenses').delete().eq('id', op.payload.id);
+              const { error: expDelErr } = await supabase.from('expenses').delete().eq('id', op.payload.id).eq('business_id', businessId);
               if (expDelErr) throw expDelErr;
               processed.push(op.id);
               break;
@@ -383,7 +383,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'category_delete': {
-              const { error: catDelErr } = await supabase.from('product_categories').delete().eq('id', op.payload.id);
+              const { error: catDelErr } = await supabase.from('product_categories').delete().eq('id', op.payload.id).eq('business_id', businessId);
               if (catDelErr) throw catDelErr;
               processed.push(op.id);
               break;
@@ -418,7 +418,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                   await Promise.all(updates);
                 }
               }
-              const { error: saleDelErr } = await supabase.from('sales').delete().eq('id', op.payload.saleId);
+              const { error: saleDelErr } = await supabase.from('sales').delete().eq('id', op.payload.saleId).eq('business_id', businessId);
               if (saleDelErr) throw saleDelErr;
               processed.push(op.id);
               break;
@@ -426,9 +426,9 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
 
             case 'debtor_delete': {
               // Restore stock from linked sale, delete sale, delete debtor payments, delete debtor
-              const { data: debtorData } = await supabase.from('debtors').select('sale_id').eq('id', op.payload.id).maybeSingle();
-              if (debtorData?.sale_id) {
-                const { data: saleData } = await supabase.from('sales').select('items').eq('id', debtorData.sale_id).maybeSingle();
+              const { data: debtorData } = await supabase.from('debtors').select('sale_id').eq('id', op.payload.id).eq('business_id', businessId).maybeSingle();
+              if (debtorData) {
+                const { data: saleData } = await supabase.from('sales').select('items').eq('id', debtorData.sale_id).eq('business_id', businessId).maybeSingle();
                 if (saleData?.items && Array.isArray(saleData.items)) {
                   const saleItems: Array<{ productId: string; quantity: number }> = saleData.items;
                   const restoreByProduct = new Map<string, number>();
@@ -445,15 +445,15 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                       const stockMap = new Map(prods.map((p: any) => [p.id, Number(p.stock ?? 0)]));
                       const updates = pIds
                         .filter((id) => stockMap.has(id))
-                        .map((id) => supabase.from('products').update({ stock: (stockMap.get(id) ?? 0) + (restoreByProduct.get(id) ?? 0) }).eq('id', id));
+                        .map((id) => supabase.from('products').update({ stock: (stockMap.get(id) ?? 0) + (restoreByProduct.get(id) ?? 0) }).eq('id', id).eq('business_id', businessId));
                       await Promise.all(updates);
                     }
                   }
                 }
-                await supabase.from('sales').delete().eq('id', debtorData.sale_id);
+                await supabase.from('sales').delete().eq('id', debtorData.sale_id).eq('business_id', businessId);
               }
               await supabase.from('debtor_payments').delete().eq('debtor_id', op.payload.id);
-              const { error: debtDelErr } = await supabase.from('debtors').delete().eq('id', op.payload.id);
+              const { error: debtDelErr } = await supabase.from('debtors').delete().eq('id', op.payload.id).eq('business_id', businessId);
               if (debtDelErr) throw debtDelErr;
               processed.push(op.id);
               break;
@@ -471,7 +471,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'quotation_update': {
-              const { error: qUpdErr } = await supabase.from('quotations').update(op.payload.header).eq('id', op.payload.id);
+              const { error: qUpdErr } = await supabase.from('quotations').update(op.payload.header).eq('id', op.payload.id).eq('business_id', businessId);
               if (qUpdErr) throw qUpdErr;
               await supabase.from('quotation_items').delete().eq('quotation_id', op.payload.id);
               if (op.payload.items?.length) {
@@ -485,7 +485,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'quotation_delete': {
-              const { error: qDelErr } = await supabase.from('quotations').update({ deleted_at: new Date().toISOString() }).eq('id', op.payload.id);
+              const { error: qDelErr } = await supabase.from('quotations').update({ deleted_at: new Date().toISOString() }).eq('id', op.payload.id).eq('business_id', businessId);
               if (qDelErr) throw qDelErr;
               processed.push(op.id);
               break;
@@ -513,7 +513,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             }
 
             case 'delivery_note_delete': {
-              const { error: dnDelErr } = await supabase.from('delivery_notes').update({ deleted_at: new Date().toISOString() }).eq('id', op.payload.id);
+              const { error: dnDelErr } = await supabase.from('delivery_notes').update({ deleted_at: new Date().toISOString() }).eq('id', op.payload.id).eq('business_id', businessId);
               if (dnDelErr) throw dnDelErr;
               processed.push(op.id);
               break;
@@ -534,7 +534,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             case 'invoice_update': {
               const realId = await resolveInvoiceId(op.payload.id);
               if (!realId) throw new Error('Invoice not found');
-              const { error: invUpdErr } = await supabase.from('invoices').update(op.payload.header).eq('id', realId);
+              const { error: invUpdErr } = await supabase.from('invoices').update(op.payload.header).eq('id', realId).eq('business_id', businessId);
               if (invUpdErr) throw invUpdErr;
               await supabase.from('invoice_items').delete().eq('invoice_id', realId);
               if (op.payload.items?.length) {
@@ -570,7 +570,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
             case 'invoice_delete': {
               const realId = await resolveInvoiceId(op.payload.id);
               if (!realId) throw new Error('Invoice not found');
-              const { error: invDelErr } = await supabase.from('invoices').update({ deleted_at: new Date().toISOString() }).eq('id', realId);
+              const { error: invDelErr } = await supabase.from('invoices').update({ deleted_at: new Date().toISOString() }).eq('id', realId).eq('business_id', businessId);
               if (invDelErr) throw invDelErr;
               processed.push(op.id);
               break;

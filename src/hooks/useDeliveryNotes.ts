@@ -86,10 +86,12 @@ export function useDeliveryNotes(businessId: string | undefined) {
   useEffect(() => { fetchDeliveryNotes(); }, [fetchDeliveryNotes]);
 
   const getDeliveryNoteWithItems = async (id: string): Promise<DeliveryNote | null> => {
+    if (!businessId) return null;
     const { data: dnData, error: dnErr } = await supabase
       .from('delivery_notes')
       .select('*')
       .eq('id', id)
+      .eq('business_id', businessId)
       .single();
     if (dnErr || !dnData) return null;
 
@@ -206,7 +208,8 @@ export function useDeliveryNotes(businessId: string | undefined) {
     }
     const { error } = await supabase.from('delivery_notes')
       .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('business_id', businessId);
     if (error) throw error;
     await fetchDeliveryNotes();
   };

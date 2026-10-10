@@ -85,7 +85,8 @@ export const useIngredients = (businessId?: string, enabled = true): UseIngredie
       id: string,
       patch: Partial<Pick<Ingredient, "name" | "unit" | "cost_per_unit" | "low_stock_warning" | "stock" | "is_active">>
     ) => {
-      const { error } = await supabase.from("ingredients").update(patch).eq("id", id);
+      if (!businessId) return false;
+      const { error } = await supabase.from("ingredients").update(patch).eq("id", id).eq("business_id", businessId);
       if (error) {
         console.warn("update ingredient error", error.message);
         return false;
@@ -93,18 +94,19 @@ export const useIngredients = (businessId?: string, enabled = true): UseIngredie
       setIngredients((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
       return true;
     },
-    []
+    [businessId]
   );
 
   const deleteIngredient = useCallback(async (id: string) => {
-    const { error } = await supabase.from("ingredients").delete().eq("id", id);
+    if (!businessId) return false;
+    const { error } = await supabase.from("ingredients").delete().eq("id", id).eq("business_id", businessId);
     if (error) {
       console.warn("delete ingredient error", error.message);
       return false;
     }
     setIngredients((prev) => prev.filter((i) => i.id !== id));
     return true;
-  }, []);
+  }, [businessId]);
 
   const restock = useCallback(
     async (id: string, quantity: number, unitCost?: number | null) => {
@@ -141,7 +143,7 @@ export const useRecipe = (businessId: string | undefined, productId: string | nu
   const [isLoading, setIsLoading] = useState(false);
 
   const refetch = useCallback(async () => {
-    if (!productId || !enabled) {
+    if (!businessId || !productId || !enabled) {
       setRecipe([]);
       return;
     }
@@ -151,6 +153,7 @@ export const useRecipe = (businessId: string | undefined, productId: string | nu
         .from("recipe_ingredients")
         .select("*")
         .eq("product_id", productId)
+        .eq("business_id", businessId)
         .order("created_at", { ascending: true });
       if (error) {
         console.warn("recipe load error", error.message);
@@ -160,7 +163,7 @@ export const useRecipe = (businessId: string | undefined, productId: string | nu
     } finally {
       setIsLoading(false);
     }
-  }, [productId, enabled]);
+  }, [businessId, productId, enabled]);
 
   useEffect(() => {
     void refetch();
@@ -187,8 +190,9 @@ export const useRecipe = (businessId: string | undefined, productId: string | nu
 
   const updateQuantity = useCallback(
     async (id: string, quantity: number) => {
+      if (!businessId) return false;
       const q = Math.max(0, Math.trunc(quantity));
-      const { error } = await supabase.from("recipe_ingredients").update({ quantity: q }).eq("id", id);
+      const { error } = await supabase.from("recipe_ingredients").update({ quantity: q }).eq("id", id).eq("business_id", businessId);
       if (error) {
         console.warn("update recipe line error", error.message);
         return false;
@@ -196,18 +200,19 @@ export const useRecipe = (businessId: string | undefined, productId: string | nu
       setRecipe((prev) => prev.map((r) => (r.id === id ? { ...r, quantity: q } : r)));
       return true;
     },
-    []
+    [businessId]
   );
 
   const removeIngredient = useCallback(async (id: string) => {
-    const { error } = await supabase.from("recipe_ingredients").delete().eq("id", id);
+    if (!businessId) return false;
+    const { error } = await supabase.from("recipe_ingredients").delete().eq("id", id).eq("business_id", businessId);
     if (error) {
       console.warn("remove recipe line error", error.message);
       return false;
     }
     setRecipe((prev) => prev.filter((r) => r.id !== id));
     return true;
-  }, []);
+  }, [businessId]);
 
   return { recipe, isLoading, refetch, addIngredient, updateQuantity, removeIngredient };
 };

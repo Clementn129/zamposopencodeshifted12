@@ -202,9 +202,12 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     // Initial hydration must never go backwards: if the server row landed
     // while this cache read was in flight, keep the fresher row.
     if (opts?.onlyIfEmpty && businessRef.current) return true;
-    // A specific branch may only be restored if it was cached for this account
-    // (or predates per-account tagging), matching getCachedBusiness's rules.
-    const owned = !!cachedBiz && (!cachedBiz.cachedForUser || cachedBiz.cachedForUser === user?.id);
+    // A specific branch may only be restored if it was cached for THIS account.
+    // An untagged entry is ambiguous once more than one business has ever been
+    // cached here, so it is never restored to an account it wasn't verified for
+    // (the generic last-used path in getCachedBusiness still handles a genuine
+    // legacy single-business install).
+    const owned = !!cachedBiz && cachedBiz.cachedForUser === user?.id;
     if (cachedBiz && owned) {
       if (businessId) await cacheBusiness(cachedBiz, user?.id);
       const now = getAdjustedTime();

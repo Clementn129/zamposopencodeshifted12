@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { cacheProducts, getCachedProducts, getUnsyncedSales, getUnsyncedStockUpdates, cacheProductImageBlob, getCachedImageBlob, getCachedImageBlobWithAge, getPendingOps } from "@/lib/offlineStorage";
+import { mergeServerProducts, getCachedProducts, cacheProductImageBlob, getCachedImageBlob, getCachedImageBlobWithAge } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type { Database } from "@/integrations/supabase/types";
 
 type ProductRow = Database["public"]["Tables"]["products"]["Row"];
-type CachedProduct = Parameters<typeof cacheProducts>[0][number];
+type CachedProduct = Parameters<typeof mergeServerProducts>[1][number];
 
 export type ItemType = 'product' | 'service';
 
@@ -297,28 +297,16 @@ export function useProducts(businessId: string | undefined) {
       setIsLoading(true);
     }
 
-    // If online, fetch fresh data and apply in ONE update
+    // If online, fetch fresh data and merge with any pending local work.
+    // NOTE: we always fetch here. An earlier version short-circuited the
+    // fetch whenever the device had any pending op (offline sale, stock
+    // update, product op) and showed the cached list instead. That left the
+    // page stale until every op had synced — e.g. a stock edit made online on
+    // one device never appeared on a device that still had an unrelated
+    // pending op. mergeServerProducts keeps optimistic local values for
+    // products with pending work while applying server truth to the rest.
     if (isOnlineRef.current) {
       try {
-        const [unsyncedSales, unsyncedStockUpdates, pendingOps] = await Promise.all([
-          getUnsyncedSales(businessId),
-          getUnsyncedStockUpdates(businessId),
-          getPendingOps(businessId),
-        ]);
-
-        const hasPendingProductOps = pendingOps.some(op => op.type.startsWith('product_'));
-        if (unsyncedSales.length > 0 || unsyncedStockUpdates.length > 0 || hasPendingProductOps) {
-          if (cached.length === 0) {
-            const retryCached = await getCachedProducts(businessId);
-            if (retryCached.length > 0) {
-              const rcm = retryCached.map(mapCachedProduct);
-              setProducts(sortProductsNewestFirst(rcm));
-            }
-            setIsLoading(false);
-          }
-          return;
-        }
-
         const { data, error: fetchError } = await supabase
           .from("products")
           .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, created_at, updated_at")
@@ -333,21 +321,12 @@ export function useProducts(businessId: string | undefined) {
 
         // Resolve signed URLs (network) before updating state — single render
         const withUrls = await resolveImageUrls(mapped);
-        // Keep existing imageUrl when available (object URL from cached blobs
-        // or signed URL from a prior fetch) to avoid reloading images that
-        // already have a working URL.
-        setProducts(prev => {
-          const prevMap = new Map(prev.map(p => [p.id, p.imageUrl]));
-          return sortProductsNewestFirst(withUrls.map(p => ({
-            ...p,
-            imageUrl: prevMap.get(p.id) ?? p.imageUrl,
-          })));
-        });
-        setIsLoading(false);
 
-        backgroundCacheImageBlobs(withUrls);
-
-        await cacheProducts(
+        // Merge the fresh server rows into the cache so changes made on other
+        // devices (and online edits) appear immediately, while products with
+        // pending local work keep their optimistic stock/values.
+        const merged = await mergeServerProducts(
+          businessId,
           withUrls.map((p) => ({
             id: p.id,
             businessId: p.businessId,
@@ -372,6 +351,21 @@ export function useProducts(businessId: string | undefined) {
             variantLabel: p.variantLabel,
           }) as any)
         );
+
+        // Keep existing imageUrl when available (object URL from cached blobs
+        // or signed URL from a prior fetch) to avoid reloading images that
+        // already have a working URL.
+        const mergedMapped = merged.map(mapCachedProduct);
+        setProducts(prev => {
+          const prevMap = new Map(prev.map(p => [p.id, p.imageUrl]));
+          return sortProductsNewestFirst(mergedMapped.map(p => ({
+            ...p,
+            imageUrl: prevMap.get(p.id) ?? p.imageUrl,
+          })));
+        });
+        setIsLoading(false);
+
+        backgroundCacheImageBlobs(withUrls);
       } catch (e: unknown) {
         if (cached.length === 0) {
           const msg = e instanceof Error ? e.message : "Failed to load products";

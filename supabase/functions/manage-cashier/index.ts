@@ -44,8 +44,32 @@ function validateUsername(u: unknown): string | null {
 }
 
 function validateRole(r: unknown): string {
-  if (r === "kitchen_staff" || r === "manager") return r;
+  if (r === "cashier" || r === "manager") return r;
   return "cashier";
+}
+
+// Best-effort in-memory throttle for the public cashier_login action. This is a
+// per-isolate guard (Supabase may run several isolates), so it is a speed bump
+// against business-code/username enumeration, not a hard guarantee. It must
+// never block legitimately different callers: the key is scoped per IP+code.
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_MAX_ATTEMPTS = 10;
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function loginRateLimited(key: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || entry.resetAt <= now) {
+    if (loginAttempts.size > 5000) {
+      for (const [k, v] of loginAttempts) {
+        if (v.resetAt <= now) loginAttempts.delete(k);
+      }
+    }
+    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > LOGIN_MAX_ATTEMPTS;
 }
 
 // Postgres 42703 / PostgREST PGRST204 both mean the column is absent, i.e. the
@@ -72,6 +96,11 @@ Deno.serve(async (req) => {
     const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
     const pin = validatePin(body.pin);
     if (!code || !username || !pin) return json({ error: "Missing code, username or PIN" }, 400);
+
+    const clientIp = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+    if (loginRateLimited(`${clientIp}|${code}`)) {
+      return json({ error: "Too many login attempts. Please try again in a minute." }, 429);
+    }
 
     const { data: bizRow } = await admin
       .from("businesses")
@@ -240,7 +269,20 @@ Deno.serve(async (req) => {
 
       // The handle_new_user trigger also auto-created a 'businesses' row for this
       // internal user — delete it so the cashier doesn't have a phantom business.
-      await admin.from("businesses").delete().eq("user_id", created.user.id);
+      // If this fails, the cashier would OWN an empty business: get_my_role()
+      // returns 'owner' (owner is checked first) and get_my_business_id()/group
+      // resolve the phantom, silently pulling them onto the wrong tenant. Fail
+      // the whole provisioning instead of leaving a half-created cashier.
+      const { error: bizDelErr } = await admin
+        .from("businesses")
+        .delete()
+        .eq("user_id", created.user.id);
+      if (bizDelErr) {
+        await admin.from("user_roles").delete().eq("user_id", created.user.id);
+        await admin.from("business_cashiers").delete().eq("id", row.id);
+        await cleanup();
+        return json({ error: "Failed to finalize cashier account" }, 500);
+      }
 
       return json({ ok: true, cashier: row });
     }

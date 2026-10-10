@@ -202,9 +202,11 @@ export function useInvoices(businessId: string | undefined) {
   useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
 
   const getInvoiceWithItems = async (id: string): Promise<Invoice | null> => {
+    if (!businessId) return null;
     const { data: invData, error: invErr } = await supabase
       .from('invoices')
       .select('*')
+      .eq('business_id', businessId)
       .or(isUuid(id) ? `id.eq.${id}` : `offline_id.eq.${id}`)
       .maybeSingle();
     if (invErr || !invData) return null;
@@ -351,7 +353,7 @@ export function useInvoices(businessId: string | undefined) {
     }
 
     const realId = isUuid(id) ? id : ((await supabase.from('invoices').select('id').eq('offline_id', id).maybeSingle()).data?.id ?? id);
-    const { error } = await supabase.from('invoices').update(updateData).eq('id', realId);
+    const { error } = await supabase.from('invoices').update(updateData).eq('id', realId).eq('business_id', businessId);
     if (error) throw error;
 
     if (items) {
@@ -441,10 +443,11 @@ export function useInvoices(businessId: string | undefined) {
       toast({ title: 'Invoice deleted offline', description: 'Will sync when connected.' });
       return;
     }
-    const realId = isUuid(id) ? id : ((await supabase.from('invoices').select('id').eq('offline_id', id).maybeSingle()).data?.id ?? id);
+    const realId = isUuid(id) ? id : ((await supabase.from('invoices').select('id').eq('business_id', businessId).eq('offline_id', id).maybeSingle()).data?.id ?? id);
     const { error } = await supabase.from('invoices')
       .update({ deleted_at: new Date().toISOString() })
-      .eq('id', realId);
+      .eq('id', realId)
+      .eq('business_id', businessId);
     if (error) throw error;
     await fetchInvoices();
   };

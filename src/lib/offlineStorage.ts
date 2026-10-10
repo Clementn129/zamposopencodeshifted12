@@ -523,8 +523,8 @@ export const updateCachedProductStock = async (productId: string, newStock: numb
 // Products that have pending local work (unsynced stock updates, unsynced
 // sales, pending product ops) keep their local stock — the server hasn't
 // caught up yet, and `cacheProducts` would otherwise wipe the offline floor.
-export const mergeServerProducts = async (businessId: string, serverProducts: OfflineProduct[]): Promise<void> => {
-  if (!businessId) return;
+export const mergeServerProducts = async (businessId: string, serverProducts: OfflineProduct[]): Promise<OfflineProduct[]> => {
+  if (!businessId) return serverProducts;
 
   const [local, stockUpdates, pendingOps, unsyncedSales] = await Promise.all([
     getCachedProducts(businessId),
@@ -534,26 +534,34 @@ export const mergeServerProducts = async (businessId: string, serverProducts: Of
   ]);
 
   const localMap = new Map(local.map((p) => [p.id, p]));
-  const locked = new Set<string>();
-  for (const u of stockUpdates) locked.add(u.productId);
+  // `fullyLocked`: pending product ops where the local row (name/price/stock/
+  // isActive/…) is the optimistic source of truth until the op syncs.
+  // `stockLocked`: only the stock floor must be preserved (offline sales or
+  // manual stock updates the server hasn't applied yet); other server fields
+  // (e.g. a renamed product) should still win.
+  const fullyLocked = new Set<string>();
+  const stockLocked = new Set<string>();
+  for (const u of stockUpdates) stockLocked.add(u.productId);
   for (const op of pendingOps) {
-    if (op.type === 'product_create') locked.add((op.payload as any).tempId);
-    if (op.type === 'product_update' || op.type === 'product_deactivate') locked.add((op.payload as any).productId);
+    if (op.type === 'product_create') fullyLocked.add((op.payload as any).tempId);
+    if (op.type === 'product_update' || op.type === 'product_deactivate') fullyLocked.add((op.payload as any).productId);
     if (op.type === 'sale_delete' || op.type === 'debtor_delete') {
       for (const it of ((op.payload as any).items ?? [])) {
-        if (it?.productId) locked.add(it.productId);
+        if (it?.productId) stockLocked.add(it.productId);
       }
     }
   }
   for (const s of unsyncedSales) {
     for (const it of ((s as any).items ?? [])) {
-      if (it?.productId) locked.add(it.productId);
+      if (it?.productId) stockLocked.add(it.productId);
     }
   }
 
   const merged: OfflineProduct[] = serverProducts.map((p) => {
     const lp = localMap.get(p.id);
-    if (locked.has(p.id) && lp) return { ...p, stock: lp.stock };
+    if (!lp) return p;
+    if (fullyLocked.has(p.id)) return lp;
+    if (stockLocked.has(p.id)) return { ...p, stock: lp.stock };
     return p;
   });
 
@@ -564,13 +572,14 @@ export const mergeServerProducts = async (businessId: string, serverProducts: Of
   }
 
   const db = await getDB();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(['products'], 'readwrite');
     const store = transaction.objectStore('products');
     for (const p of merged) store.put(p);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
+  return merged;
 };
 
 // Subscription cache using localStorage (simpler for critical data)
@@ -839,12 +848,13 @@ export const getCachedBusiness = async (userId?: string): Promise<CachedBusiness
           resolve(mostRecentlyUsed(mine));
           return;
         }
-        // Pre-per-account data has no tag. If there's exactly one untagged
-        // entry it was this device's single business — keep using it so
-        // existing installs don't lose offline access. Tagged entries belong
-        // to other accounts and are never shown to a different account.
+        // Pre-per-account data has no tag. Only adopt an untagged entry when it
+        // is the SOLE cached business on this device (a genuine legacy
+        // single-business install). If more than one business is cached, an
+        // untagged row is ambiguous and must never be handed to an account it
+        // wasn't verified for — returning null forces a safe server re-resolve.
         const untagged = results.filter((entry) => !entry.cachedForUser);
-        if (untagged.length === 1) {
+        if (untagged.length === 1 && results.length === 1) {
           resolve(untagged[0]);
           return;
         }
@@ -1038,6 +1048,42 @@ export const readOfflineSessionRecord = (): OfflineSessionRecord | null => {
 export const clearOfflineSession = (): void => {
   try {
     localStorage.removeItem(OFFLINE_SESSION_KEY);
+  } catch {
+    // noop
+  }
+};
+
+/**
+ * Clear per-account caches that must never survive into a different account on
+ * the same device: cached credentials, cashier lookup entries, the device-level
+ * subscription snapshot, server-time anti-tamper reference, and per-business
+ * business-type flags. Business-scoped data (products, pending ops, cart) is
+ * intentionally left untouched so an offline session's unsynced work is not lost.
+ */
+export const clearAccountCaches = async (): Promise<void> => {
+  try {
+    localStorage.removeItem('zampos_subscription');
+    localStorage.removeItem('zampos_time_offset');
+    localStorage.removeItem('zampos_last_server_sync');
+    const staleKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('zampos_business_type_')) staleKeys.push(key);
+    }
+    staleKeys.forEach(k => localStorage.removeItem(k));
+  } catch {
+    // noop
+  }
+  try {
+    const db = await getDB();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(['offline_users', 'cashierLookup'], 'readwrite');
+      tx.objectStore('offline_users').clear();
+      tx.objectStore('cashierLookup').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
   } catch {
     // noop
   }

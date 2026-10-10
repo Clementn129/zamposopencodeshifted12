@@ -102,10 +102,12 @@ export function useQuotations(businessId: string | undefined) {
   useEffect(() => { fetchQuotations(); }, [fetchQuotations]);
 
   const getQuotationWithItems = async (id: string): Promise<Quotation | null> => {
+    if (!businessId) return null;
     const { data: qData, error: qErr } = await supabase
       .from('quotations')
       .select('*')
       .eq('id', id)
+      .eq('business_id', businessId)
       .single();
     if (qErr || !qData) return null;
 
@@ -239,7 +241,7 @@ export function useQuotations(businessId: string | undefined) {
       return;
     }
 
-    const { error } = await supabase.from('quotations').update(updateData).eq('id', id);
+    const { error } = await supabase.from('quotations').update(updateData).eq('id', id).eq('business_id', businessId);
     if (error) throw error;
 
     if (items) {
@@ -280,7 +282,8 @@ export function useQuotations(businessId: string | undefined) {
     }
     const { error } = await supabase.from('quotations')
       .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('business_id', businessId);
     if (error) throw error;
     await fetchQuotations();
   };
@@ -293,10 +296,11 @@ export function useQuotations(businessId: string | undefined) {
   };
 
   const markConverted = async (quotationId: string, saleId: string) => {
+    if (!businessId) return;
     await supabase.from('quotations').update({
       status: 'converted' as any,
       converted_sale_id: saleId,
-    }).eq('id', quotationId);
+    }).eq('id', quotationId).eq('business_id', businessId);
     await fetchQuotations();
   };
 

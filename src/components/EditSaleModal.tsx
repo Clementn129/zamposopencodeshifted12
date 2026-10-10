@@ -30,11 +30,12 @@ type Sale = {
 
 type EditSaleModalProps = {
   sale: Sale | null;
+  businessId?: string;
   onClose: () => void;
   onUpdated: () => void;
 };
 
-const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
+const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalProps) => {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [refunding, setRefunding] = useState(false);
@@ -81,7 +82,8 @@ const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
           total,
           payment_method: paymentMethod,
         })
-        .eq('id', sale.id);
+        .eq('id', sale.id)
+        .match(businessId ? { business_id: businessId } : {});
 
       if (error) throw error;
 
@@ -139,7 +141,8 @@ const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
           total: newTotal,
           status: newStatus,
         })
-        .eq('id', sale.id);
+        .eq('id', sale.id)
+        .match(businessId ? { business_id: businessId } : {});
 
       if (saleError) throw saleError;
 
@@ -151,6 +154,7 @@ const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
             .from('products')
             .select('stock')
             .eq('id', productId)
+            .match(businessId ? { business_id: businessId } : {})
             .maybeSingle();
 
           if (product) {
@@ -158,7 +162,8 @@ const EditSaleModal = ({ sale, onClose, onUpdated }: EditSaleModalProps) => {
             await supabase
               .from('products')
               .update({ stock: newStock })
-              .eq('id', productId);
+              .eq('id', productId)
+              .match(businessId ? { business_id: businessId } : {});
           }
         }
       }

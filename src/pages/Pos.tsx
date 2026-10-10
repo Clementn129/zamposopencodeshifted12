@@ -899,6 +899,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         .from('quotations')
         .select('id, customer_name, customer_phone')
         .eq('id', quotationId)
+        .eq('business_id', business.id)
         .single();
       if (qErr || !qData) {
         toast({ variant: "destructive", title: "Error", description: "Quotation not found" });
@@ -934,6 +935,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         .from('quotations')
         .select('customer_name, customer_phone, customer_email, customer_tpin')
         .eq('id', quotationId)
+        .eq('business_id', business.id)
         .single();
       if (qErr || !qData) {
         toast({ variant: "destructive", title: "Error", description: "Quotation not found" });
@@ -973,6 +975,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         .from('delivery_notes')
         .select('customer_name, customer_phone')
         .eq('id', deliveryNoteId)
+        .eq('business_id', business.id)
         .single();
       if (dErr || !dData) {
         toast({ variant: "destructive", title: "Error", description: "Delivery note not found" });

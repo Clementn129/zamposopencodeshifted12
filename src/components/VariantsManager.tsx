@@ -70,7 +70,7 @@ const VariantsManager = ({ parent, variants, onChanged, disabled }: Props) => {
         stock: Number(editStock) || 0,
         cost_price: editCostPrice.trim() ? Number(editCostPrice) : null,
         barcode: editBarcode.trim() || null,
-      }).eq("id", id);
+      }).eq("id", id).eq("business_id", parent.businessId);
       if (error) throw error;
       setEditingId(null);
       await onChanged();
@@ -131,7 +131,7 @@ const VariantsManager = ({ parent, variants, onChanged, disabled }: Props) => {
 
   const removeVariant = async (id: string) => {
     try {
-      const { error } = await supabase.from("products").update({ is_active: false }).eq("id", id);
+      const { error } = await supabase.from("products").update({ is_active: false }).eq("id", id).eq("business_id", parent.businessId);
       if (error) throw error;
       await onChanged();
     } catch (e) {

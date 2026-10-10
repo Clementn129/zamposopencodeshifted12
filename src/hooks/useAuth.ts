@@ -5,6 +5,7 @@ import {
   persistOfflineSession,
   readOfflineSessionRecord,
   clearOfflineSession,
+  clearAccountCaches,
   type OfflineSessionRecord,
 } from '@/lib/offlineStorage';
 
@@ -523,6 +524,10 @@ export const useAuth = () => {
       // Clear first: the SIGNED_OUT event below must not resurrect the
       // persisted offline login for this device.
       clearOfflineSession();
+      // Purge account-scoped caches so a different account signing in on this
+      // device can never see the previous account's credentials, roles,
+      // subscription snapshot, or business-type flags.
+      void clearAccountCaches();
       // Clear in-memory state immediately. If the network is down,
       // supabase.auth.signOut() can fail or never emit SIGNED_OUT, and the
       // previous user would otherwise stay logged in.
