@@ -497,6 +497,18 @@ export const getCachedProducts = async (businessId: string): Promise<OfflineProd
   });
 };
 
+export const removeCachedProduct = async (productId: string): Promise<void> => {
+  if (!productId) return;
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['products'], 'readwrite');
+    const store = transaction.objectStore('products');
+    store.delete(productId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+};
+
 export const updateCachedProductStock = async (productId: string, newStock: number): Promise<void> => {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -516,6 +528,57 @@ export const updateCachedProductStock = async (productId: string, newStock: numb
       }
     };
     getRequest.onerror = () => reject(getRequest.error);
+  });
+};
+
+// After an offline quick-add finally creates its real product, rewrite any
+// local references still pointing at the temp id so a sale that syncs LATER
+// does not carry the offline_ id. Sales that synced earlier are relinked
+// server-side by quick_add_product (p_temp_id).
+export const relinkTempProductId = async (businessId: string, tempId: string, realId: string): Promise<void> => {
+  if (!businessId || !tempId || !realId || tempId === realId) return;
+  const db = await getDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['sales', 'pendingOps', 'products'], 'readwrite');
+
+    const salesStore = tx.objectStore('sales');
+    const salesReq = salesStore.getAll();
+    salesReq.onsuccess = () => {
+      for (const sale of salesReq.result as OfflineSale[]) {
+        if (sale.synced === true || sale.businessId !== businessId) continue;
+        let changed = false;
+        for (const item of sale.items ?? []) {
+          if (item && item.productId === tempId) {
+            item.productId = realId;
+            changed = true;
+          }
+        }
+        if (changed) salesStore.put(sale);
+      }
+    };
+
+    const opsStore = tx.objectStore('pendingOps');
+    const opsReq = opsStore.index('businessId').getAll(IDBKeyRange.only(businessId));
+    opsReq.onsuccess = () => {
+      for (const op of opsReq.result as PendingOp[]) {
+        const items = (op.payload as any)?.items;
+        if (!Array.isArray(items)) continue;
+        let changed = false;
+        for (const it of items) {
+          if (it && it.productId === tempId) {
+            it.productId = realId;
+            changed = true;
+          }
+        }
+        if (changed) opsStore.put(op);
+      }
+    };
+
+    // Drop the temp cache row; the real product arrives on the next server merge.
+    tx.objectStore('products').delete(tempId);
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 };
 
@@ -541,9 +604,17 @@ export const mergeServerProducts = async (businessId: string, serverProducts: Of
   // (e.g. a renamed product) should still win.
   const fullyLocked = new Set<string>();
   const stockLocked = new Set<string>();
+  // Temp ids of quick-add ops that can still run. Their ghost must survive so a
+  // pending create isn't visually lost before it syncs; anything else orphaned
+  // is pruned below (permanently-failed ops do NOT protect their ghost).
+  const retryableTempIds = new Set<string>();
   for (const u of stockUpdates) stockLocked.add(u.productId);
   for (const op of pendingOps) {
-    if (op.type === 'product_create') fullyLocked.add((op.payload as any).tempId);
+    if (op.type === 'product_create') {
+      const t = (op.payload as any).tempId;
+      fullyLocked.add(t);
+      if (t && op.permanentlyFailed !== true) retryableTempIds.add(t);
+    }
     if (op.type === 'product_update' || op.type === 'product_deactivate') fullyLocked.add((op.payload as any).productId);
     if (op.type === 'sale_delete' || op.type === 'debtor_delete') {
       for (const it of ((op.payload as any).items ?? [])) {
@@ -565,10 +636,20 @@ export const mergeServerProducts = async (businessId: string, serverProducts: Of
     return p;
   });
 
-  // Keep any local products the server pull didn't return — never drop local rows.
+  // Keep any local products the server pull didn't return — but drop orphaned
+  // quick-add temp products (`offline_*`) that no pending op or unsynced work
+  // still needs. Without this cleanup every offline quick-add leaves a
+  // permanent ghost that duplicates the real product and keeps getting sold.
   const serverIds = new Set(serverProducts.map((p) => p.id));
+  const orphanIds: string[] = [];
   for (const lp of local) {
-    if (!serverIds.has(lp.id)) merged.push(lp);
+    if (serverIds.has(lp.id)) continue;
+    const isTemp = typeof lp.id === 'string' && lp.id.startsWith('offline_');
+    if (!isTemp || retryableTempIds.has(lp.id) || stockLocked.has(lp.id)) {
+      merged.push(lp);
+    } else {
+      orphanIds.push(lp.id);
+    }
   }
 
   const db = await getDB();
@@ -576,6 +657,7 @@ export const mergeServerProducts = async (businessId: string, serverProducts: Of
     const transaction = db.transaction(['products'], 'readwrite');
     const store = transaction.objectStore('products');
     for (const p of merged) store.put(p);
+    for (const id of orphanIds) store.delete(id);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });

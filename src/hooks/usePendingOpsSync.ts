@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { getPendingOps, removePendingOp, updatePendingOpRetry, mergeServerProducts, mergeServerDebtors, mergeServerInvoices, generateOfflineId, getPendingImageUpload, removePendingImageUpload, getPermanentlyFailedOps, resetFailedOps } from "@/lib/offlineStorage";
+import { getPendingOps, removePendingOp, updatePendingOpRetry, mergeServerProducts, mergeServerDebtors, mergeServerInvoices, generateOfflineId, getPendingImageUpload, removePendingImageUpload, getPermanentlyFailedOps, resetFailedOps, removeCachedProduct, relinkTempProductId } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
 // Maximum number of retries before marking an op as permanently failed
@@ -39,6 +39,29 @@ const clearResolvedPendingImage = async (imageUrl: string | null | undefined): P
 };
 
 const isUuid = (v: string): boolean => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
+
+// PostgREST surfaces RLS denials as 42501 / "row-level security"/"permission
+// denied". Used to fall back to the member-callable quick_add_product when a
+// non-owner (cashier) replay hits the owner-only products INSERT policy.
+const isPermissionError = (err: unknown): boolean => {
+  if (!err) return false;
+  const e = err as { code?: string; message?: string; details?: string };
+  if (e.code === '42501') return true;
+  const haystack = `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase();
+  return haystack.includes('row-level security') || haystack.includes('permission denied');
+};
+
+// A client build can reach devices before the 4-arg quick_add_product migration
+// is applied. Detect the missing-overload error so quick-adds still land through
+// the legacy 3-arg function instead of failing forever.
+const isMissingFunctionError = (err: unknown): boolean => {
+  if (!err) return false;
+  const e = err as { code?: string; message?: string; details?: string };
+  if (e.code === 'PGRST202') return true;
+  const haystack = `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase();
+  return haystack.includes('could not find the function')
+    || (haystack.includes('quick_add_product') && haystack.includes('does not exist'));
+};
 
 // Offline-created invoices carry an `offline_*` local id. Resolve it to the
 // real DB id so table-update ops (soft delete, item re-insert) target the row
@@ -234,14 +257,31 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               // Cashiers have no INSERT rights on products (RLS is owner-only), so a
               // quick-add made offline must replay through the member-callable function.
               const isQuickAdd = op.payload.quickAdd === true;
+              // True once the product was created via quick_add_product (untracked and
+              // relinked server-side through p_temp_id), so the tracked-stock fixup
+              // below is skipped.
+              let viaQuickAdd = isQuickAdd;
               let newProductId: string | undefined;
 
-              if (isQuickAdd) {
-                const { data: quickId, error: quickErr } = await supabase.rpc('quick_add_product', {
+              const quickAdd = async () => {
+                const withTemp = await (supabase.rpc as any)('quick_add_product', {
                   p_business_id: businessId,
                   p_name: op.payload.name,
                   p_price: op.payload.price,
+                  p_temp_id: tempId || null,
                 });
+                if (withTemp.error && isMissingFunctionError(withTemp.error)) {
+                  return await (supabase.rpc as any)('quick_add_product', {
+                    p_business_id: businessId,
+                    p_name: op.payload.name,
+                    p_price: op.payload.price,
+                  });
+                }
+                return withTemp;
+              };
+
+              if (isQuickAdd) {
+                const { data: quickId, error: quickErr } = await quickAdd();
                 if (quickErr) throw quickErr;
                 newProductId = quickId || undefined;
               } else {
@@ -263,16 +303,30 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                   track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
                   expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
                 }).select('id');
-                if (createErr) throw createErr;
-                newProductId = created?.[0]?.id;
-                await clearResolvedPendingImage(op.payload.image_url);
+
+                if (createErr) {
+                  // Legacy quick-add ops (queued before the `quickAdd` flag existed)
+                  // have no flag, so they attempt the owner-only insert and fail for a
+                  // cashier. Retry through the member-callable function so they land.
+                  if (isPermissionError(createErr)) {
+                    const { data: quickId, error: quickErr } = await quickAdd();
+                    if (quickErr) throw quickErr;
+                    newProductId = quickId || undefined;
+                    viaQuickAdd = true;
+                  } else {
+                    throw createErr;
+                  }
+                } else {
+                  newProductId = created?.[0]?.id;
+                  await clearResolvedPendingImage(op.payload.image_url);
+                }
               }
 
               // If this product was created offline with a temp ID, any sales that synced
               // before this product existed will have items referencing the temp ID.
-              // Decrement stock for those sales now. Quick-adds are untracked (stock 0),
-              // so they never get this fixup.
-              if (tempId && newProductId && !isQuickAdd) {
+              // Decrement stock for those sales now. Quick-adds are untracked (stock 0)
+              // and relink their sales inside quick_add_product, so they skip this fixup.
+              if (tempId && newProductId && !viaQuickAdd) {
                 try {
                   const { data: affectedSales } = await supabase
                     .from('sales')
@@ -301,6 +355,16 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                   }
                 } catch {
                   // stock fixup best-effort
+                }
+              }
+
+              // Point any still-unsynced local sale (queued while offline) at the
+              // real product id, so it can't sync later carrying the offline_ id.
+              if (tempId && newProductId) {
+                try {
+                  await relinkTempProductId(businessId, tempId, newProductId);
+                } catch (relinkErr) {
+                  console.error(`Could not relink local temp product ${tempId}:`, relinkErr);
                 }
               }
 
@@ -752,6 +816,15 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
       const ops = businessId ? await getPendingOps(businessId) : [];
       const toRemove = ops.filter((op) => opIds.includes(op.id));
       for (const op of toRemove) {
+        // Discarding a quick-add op must also drop its optimistic temp product,
+        // otherwise the offline_ ghost stays on the device forever.
+        if (op.type === 'product_create' && op.payload?.tempId) {
+          try {
+            await removeCachedProduct(op.payload.tempId);
+          } catch (cacheErr) {
+            console.error(`Could not remove cached product ${op.payload.tempId}:`, cacheErr);
+          }
+        }
         await removePendingOp(op.id);
       }
       await refreshFailedOps();

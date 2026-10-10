@@ -58,6 +58,7 @@ import IngredientsManager from "@/components/IngredientsManager";
 import DishRecipeDialog from "@/components/DishRecipeDialog";
 import RecipeEditor, { type DraftRecipeLine } from "@/components/RecipeEditor";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { useSyncStatus } from "@/contexts/SyncStatusContext";
 import PendingStockRequests from "@/components/PendingStockRequests";
 
 import { useBusiness } from "@/hooks/useBusiness";
@@ -104,6 +105,9 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     business?.id,
     business?.preventNegativeStock
   );
+  // Failed offline ops (e.g. a cashier quick-add) are owned by AppSyncManager;
+  // surface them here so the owner can Retry/Discard instead of them failing silently.
+  const { failedOps, retryFailedOps, clearFailedOps } = useSyncStatus();
   const { labels, isService, isHybrid, isRestaurant } = useBusinessType(business?.id, business?.businessType);
   const {
     categories,
@@ -965,6 +969,17 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
         isSyncing={stockSyncing}
         pendingCount={stockPending}
         lastSyncError={null}
+        failedCount={failedOps.length}
+        failedDetail={failedOps[0]?.lastError ?? null}
+        onRetryFailed={() => {
+          void retryFailedOps(failedOps.map((op) => op.id));
+        }}
+        onClearFailed={() => {
+          void clearFailedOps(failedOps.map((op) => op.id));
+        }}
+        onSyncNow={() => {
+          void syncStockNow();
+        }}
       />
       <div className="min-h-screen bg-background safe-area-inset">
         <header className="bg-card border-b border-border px-3 py-3 sm:px-4 sm:py-4">
