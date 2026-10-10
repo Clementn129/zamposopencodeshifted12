@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Bell, Building2, Calendar, CalendarMinus, CheckCircle2, CreditCard, DollarSign, Download, LogOut, Phone, Mail, MapPin, Plus, Power, PowerOff, Settings as SettingsIcon, Shield, TrendingUp, Trash2, Users, Wallet, Wifi, XCircle } from "lucide-react";
+import { Activity, BarChart3, Bell, Building2, Calendar, CalendarMinus, CheckCircle2, CreditCard, DollarSign, Download, LogOut, Phone, Mail, MapPin, Plus, Power, PowerOff, Settings as Search, SettingsIcon, Shield, TrendingUp, Trash2, Users, Wallet, Wifi, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +78,7 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [adminChecked, setAdminChecked] = useState(false);
   const [roleTimeout, setRoleTimeout] = useState(false);
+  const [businessSearch, setBusinessSearch] = useState("");
 
   useEffect(() => {
     const t = setTimeout(() => setRoleTimeout(true), 5000);
@@ -115,7 +116,7 @@ const AdminDashboard = () => {
         .from("businesses")
         .select("id,name,user_id,payment_code,subscription_status,subscription_expires_at,is_locked,last_sync_at,created_at,phone,email,address,plan_tier,monthly_price_zmw")
         .order("created_at", { ascending: false })
-        .limit(200);
+        .limit(1000);
       if (bizErr) throw bizErr;
       setBusinesses((biz ?? []) as BusinessRow[]);
 
@@ -166,11 +167,14 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    if (user && isSuperAdmin) {
+    // Depend on the stable user id (not the whole user object): Supabase
+    // replaces the user object on token refresh, which would otherwise re-run
+    // refresh() and flash the loading state on an unrelated re-auth.
+    if (user?.id && isSuperAdmin) {
       refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isSuperAdmin]);
+  }, [user?.id, isSuperAdmin]);
 
   const approve = async (p: PaymentRow) => {
     if (!user) return;
@@ -568,6 +572,16 @@ const AdminDashboard = () => {
     };
   }, [businesses, payments, cashierCounts]);
 
+  const filteredBusinesses = useMemo(() => {
+    const q = businessSearch.trim().toLowerCase();
+    if (!q) return businesses;
+    return businesses.filter(
+      (b) =>
+        b.name.toLowerCase().includes(q) ||
+        b.payment_code.toLowerCase().includes(q),
+    );
+  }, [businesses, businessSearch]);
+
 
   if (authLoading || !adminChecked || (isSuperAdmin && loading)) {
     return (
@@ -879,14 +893,28 @@ const AdminDashboard = () => {
           <Card>
 
             <CardHeader>
-              <CardTitle className="text-lg">Businesses ({businesses.length})</CardTitle>
+              <CardTitle className="text-lg">
+                Businesses ({filteredBusinesses.length}
+                {filteredBusinesses.length !== businesses.length ? ` of ${businesses.length}` : ""})
+              </CardTitle>
               <CardDescription>Manage subscriptions, lock/unlock accounts</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {businesses.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No businesses registered yet.</p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by business name or code…"
+                  value={businessSearch}
+                  onChange={(e) => setBusinessSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              {filteredBusinesses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {businesses.length === 0 ? "No businesses registered yet." : "No businesses match your search."}
+                </p>
               ) : (
-                businesses.map((b) => {
+                filteredBusinesses.map((b) => {
                   const profile = getProfile(b.user_id);
                   return (
                     <div key={b.id} className="bg-secondary rounded-lg p-4 space-y-3">
