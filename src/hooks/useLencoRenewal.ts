@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { lenco, preloadLenco } from "@/lib/lenco";
+import { getLencoOnlineTotal, getLencoServiceFee } from "@/lib/paymentDetails";
 import { supabase } from "@/integrations/supabase/client";
 
 type LencoRenewalArgs = {
@@ -128,6 +129,11 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
   const { toast } = useToast();
   const [paying, setPaying] = useState(false);
 
+  // Online renewals carry a flat service fee to cover Lenco's payout fee; the
+  // total is grossed up so Lenco's 1% collection cut is covered as well.
+  const serviceFeeZmw = getLencoServiceFee(amountZmw);
+  const onlineTotalZmw = getLencoOnlineTotal(amountZmw);
+
   useEffect(() => {
     preloadLenco();
 
@@ -188,7 +194,7 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
       // prompt is approved late, the background check above still finds it.
       writePending({ reference, businessId, months, ts: Date.now() });
 
-      await lenco.openCheckout({ reference, amount: amountZmw, email });
+      await lenco.openCheckout({ reference, amount: onlineTotalZmw, email });
 
       const result = await verifyWithRetry(reference, businessId, months);
 
@@ -234,7 +240,7 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
     } finally {
       setPaying(false);
     }
-  }, [businessId, paymentCode, email, months, amountZmw, onRenewed, paying, toast]);
+  }, [businessId, paymentCode, email, months, amountZmw, onlineTotalZmw, onRenewed, paying, toast]);
 
-  return { paying, payWithLenco };
+  return { paying, payWithLenco, serviceFeeZmw, onlineTotalZmw };
 }

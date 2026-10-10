@@ -96,6 +96,35 @@ export const resolveMonthlyPrice = ({
   return { priceZmw: tier.priceZmw, label: tier.label, isCustom: tier.priceZmw <= 0, locked: false };
 };
 
+/**
+ * Lenco charges a flat, banded fee to pay money OUT of their platform to a
+ * mobile-money wallet (https://lenco.co/zm/pricing). When a client renews
+ * online we pass that cost on so the withdrawal fee doesn't eat the payment.
+ * Bands: ≤K1,000 → K12; ≤K50,000 → K15; above → K35.
+ */
+export const LENCO_SERVICE_FEE_TIERS = [
+  { maxAmountZmw: 1000, feeZmw: 12 },
+  { maxAmountZmw: 50_000, feeZmw: 15 },
+  { maxAmountZmw: Infinity, feeZmw: 35 },
+] as const;
+
+/** Flat service fee (ZMW) added to an online renewal of the given amount. */
+export const getLencoServiceFee = (amountZmw: number): number => {
+  if (!Number.isFinite(amountZmw) || amountZmw <= 0) return 0;
+  const tier = LENCO_SERVICE_FEE_TIERS.find((t) => amountZmw <= t.maxAmountZmw);
+  return tier ? tier.feeZmw : LENCO_SERVICE_FEE_TIERS[LENCO_SERVICE_FEE_TIERS.length - 1].feeZmw;
+};
+
+/**
+ * What the client is actually charged online: the subscription plus the flat
+ * service fee, grossed up so Lenco's 1% collection cut is covered too.
+ * e.g. K200 → (200 + 12) / 0.99 = K215.
+ */
+export const getLencoOnlineTotal = (amountZmw: number): number => {
+  const fee = getLencoServiceFee(amountZmw);
+  if (fee === 0) return amountZmw;
+  return Math.ceil((amountZmw + fee) / 0.99);
+};
 
 export const buildWhatsAppPaymentLink = (args: {
   paymentCode: string;
