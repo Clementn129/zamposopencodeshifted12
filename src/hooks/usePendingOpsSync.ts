@@ -153,6 +153,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 p_due_date: op.payload.dueDate || null,
                 p_customer_phone: op.payload.customerPhone || null,
                 p_table_id: (op.payload as any).tableId || null,
+                p_cashier_id: op.payload.cashierUserId || null,
               });
 
               if (saleErr) throw saleErr;

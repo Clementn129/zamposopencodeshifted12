@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Boxes, ChefHat, CalendarClock } from "lucide-react";
+import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Receipt, Boxes, ChefHat, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import LockScreen from "@/components/LockScreen";
 import QuotationTab from "@/components/QuotationTab";
 import DeliveryNoteTab from "@/components/DeliveryNoteTab";
 import InvoiceTab from "@/components/InvoiceTab";
+import CashierMySales from "@/components/CashierMySales";
 import { InvoicePrefill } from "@/components/InvoiceForm";
 import MenuModifierPicker, { ModifierPick } from "@/components/MenuModifierPicker";
 import QuickAddProduct from "@/components/QuickAddProduct";
@@ -688,6 +689,8 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       amountPaid: amountPaidNow,
       dueDate: dueDate || null,
       tableId: selectedTable?.id ?? null,
+      cashierUserId: user?.id ?? null,
+      cashierName: cashierName ?? null,
     };
 
     try {
@@ -732,6 +735,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
             p_due_date: dueDate || null,
             p_customer_phone: salePayload.customerPhone,
             p_table_id: selectedTable?.id ?? null,
+            p_cashier_id: salePayload.cashierUserId,
           });
           if (saleErr) throw saleErr;
           returnedSaleId = (rid as string | null) ?? null;
@@ -791,6 +795,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
               createdAt,
               amountPaid: amountPaidNow,
               tableId: salePayload.tableId,
+              cashierUserId: salePayload.cashierUserId,
             },
             createdAt,
           });
@@ -1164,7 +1169,16 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                 <Boxes className="h-4 w-4 mr-1" /> Stock
               </Button>
               {role === 'cashier' ? (
-                <Button variant="destructive" size="sm" onClick={async () => { await signOut(); navigate('/auth'); }}>
+                <Button variant="destructive" size="sm" onClick={async () => {
+                  // Hand off any unsynced sales before logging out so they are
+                  // attributed to this cashier now rather than waiting for the
+                  // next person to sign in. Best-effort: if offline we still log
+                  // out — the local sales are stamped and will sync correctly.
+                  if (isOnline && pendingCount > 0) {
+                    try { await syncNow(); } catch { /* carry on to sign out */ }
+                  }
+                  await signOut(); navigate('/auth');
+                }}>
                   <LogOut className="h-4 w-4 mr-1" /> Logout
                 </Button>
               ) : null}
@@ -1189,6 +1203,11 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
               <TabsTrigger value="invoices" className="flex items-center gap-1.5 shrink-0">
                 <ReceiptText className="h-4 w-4" /> Invoices
               </TabsTrigger>
+              {role === 'cashier' && (
+                <TabsTrigger value="my-sales" className="flex items-center gap-1.5 shrink-0">
+                  <Receipt className="h-4 w-4" /> My Sales
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="sale">
@@ -1666,6 +1685,26 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                 }}
               />
             </TabsContent>
+            {role === 'cashier' && (
+              <TabsContent value="my-sales">
+                <CashierMySales
+                  businessId={business.id}
+                  businessName={business.name}
+                  businessDetails={{
+                    phone: business.phone,
+                    email: business.email,
+                    address: business.address,
+                    logoUrl: business.logoUrl,
+                    tpin: business.tpin,
+                    taxMode: business.taxMode,
+                    vatRate: business.vatRate,
+                    customTaxName: business.customTaxName,
+                    customTaxRate: business.customTaxRate,
+                  }}
+                  isService={isService}
+                />
+              </TabsContent>
+            )}
           </Tabs>
         </main>
       </div>

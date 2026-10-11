@@ -53,6 +53,12 @@ interface OfflineSale {
   amountPaid?: number;
   dueDate?: string | null;
   tableId?: string | null;
+  /** Auth user id of the cashier who rang this sale. Stamped at creation so a
+   *  sale rung offline is still credited to the right cashier even when a
+   *  different cashier syncs it after a shift handover. */
+  cashierUserId?: string | null;
+  /** Display name of the selling cashier, for the "My Sales" view. */
+  cashierName?: string | null;
 }
 
 interface OfflineStockUpdate {
@@ -1138,9 +1144,12 @@ export const clearOfflineSession = (): void => {
 /**
  * Clear per-account caches that must never survive into a different account on
  * the same device: cached credentials, cashier lookup entries, the device-level
- * subscription snapshot, server-time anti-tamper reference, and per-business
- * business-type flags. Business-scoped data (products, pending ops, cart) is
- * intentionally left untouched so an offline session's unsynced work is not lost.
+ * subscription snapshot, server-time anti-tamper reference, per-business
+ * business-type flags, and the cached sales history (salesCache — another
+ * cashier's sales must not be readable by whoever signs in next on a shared
+ * POS device). Unsynced work (the `sales` outbox, pending ops, cart) and the
+ * shared catalogue (products) are intentionally left untouched so an offline
+ * session's unsynced work is not lost.
  */
 export const clearAccountCaches = async (): Promise<void> => {
   try {
@@ -1159,9 +1168,10 @@ export const clearAccountCaches = async (): Promise<void> => {
   try {
     const db = await getDB();
     await new Promise<void>((resolve) => {
-      const tx = db.transaction(['offline_users', 'cashierLookup'], 'readwrite');
+      const tx = db.transaction(['offline_users', 'cashierLookup', 'salesCache'], 'readwrite');
       tx.objectStore('offline_users').clear();
       tx.objectStore('cashierLookup').clear();
+      tx.objectStore('salesCache').clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
