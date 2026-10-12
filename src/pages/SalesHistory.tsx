@@ -492,12 +492,10 @@ const SalesHistory = () => {
         const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
         const itemRevenue = itemTotal - itemDiscountShare;
 
-        totalCost += costPrice * qty;
-        if (costPrice > 0) {
-          hasCostData = true;
-          const itemCost = costPrice * qty;
-          totalProfit += itemRevenue - itemCost;
-        }
+        const itemCost = costPrice * qty;
+        totalCost += itemCost;
+        totalProfit += itemRevenue - itemCost;
+        if (costPrice > 0) hasCostData = true;
       });
     });
 
@@ -569,12 +567,10 @@ const SalesHistory = () => {
         const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
         const itemRevenue = itemTotal - itemDiscountShare;
 
-        totalCost += costPrice * qty;
-        if (costPrice > 0) {
-          hasCostData = true;
-          const itemCost = costPrice * qty;
-          totalProfit += itemRevenue - itemCost;
-        }
+        const itemCost = costPrice * qty;
+        totalCost += itemCost;
+        totalProfit += itemRevenue - itemCost;
+        if (costPrice > 0) hasCostData = true;
       });
     });
 
@@ -723,9 +719,6 @@ const SalesHistory = () => {
   // carry `finalSalePrice` (per-unit, discount already apportioned); legacy
   // items fall back to the sale-level discount share inside `lineRevenue`.
   const calculateItemProfit = (sale: Sale, item: SaleItem) => {
-    const costPrice = Number(item.costPrice) || 0;
-    if (costPrice === 0) return null;
-
     const revenue = lineRevenue(item, Number(sale.subtotal) || 0, Number(sale.discountAmount) || 0);
     return revenue - lineCost(item);
   };
@@ -867,11 +860,9 @@ const SalesHistory = () => {
                     Cost: ZMW {itemCost.toFixed(2)}
                   </span>
                 )}
-                {profit !== null && (
-                  <span className={`${profit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                    Profit: ZMW {profit.toFixed(2)}
-                  </span>
-                )}
+                <span className={`${profit >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                  Profit: ZMW {profit.toFixed(2)}
+                </span>
               </span>
             </div>
           );
