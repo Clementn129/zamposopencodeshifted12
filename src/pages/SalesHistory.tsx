@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, BarChart3, Calendar, Download, Edit, Receipt, TrendingUp, Trash2, RotateCcw, Check, Clock, DollarSign, Tag, Wallet, Eye, Search, X } from "lucide-react";
+import { ArrowLeft, BarChart3, Calendar, Download, Edit, Receipt, TrendingUp, Trash2, RotateCcw, Check, Clock, DollarSign, Tag, Wallet, PiggyBank, Eye, Search, X } from "lucide-react";
 import { format, startOfDay, startOfWeek, startOfMonth, endOfMonth, getMonth, getYear, setMonth, setYear } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1020,7 +1020,7 @@ const SalesHistory = () => {
               </div>
 
               {/* Stats Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <Card>
                   <CardContent className="p-4 text-center">
                     <p className="text-xs text-muted-foreground">Total Sales</p>
@@ -1029,8 +1029,14 @@ const SalesHistory = () => {
                 </Card>
                 <Card>
                   <CardContent className="p-4 text-center">
-                    <p className="text-xs text-muted-foreground">Expenses</p>
+                    <p className="text-xs text-muted-foreground">Business Expenses</p>
                     <p className="text-xl font-display font-bold text-destructive">ZMW {stats.totalExpenses.toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Owner Drawings</p>
+                    <p className="text-xl font-display font-bold text-purple-600">ZMW {stats.ownerDrawings.toFixed(2)}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -1232,10 +1238,20 @@ const SalesHistory = () => {
                   <CardContent className="p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <TrendingUp className="h-4 w-4 text-destructive" />
-                      <p className="text-xs text-muted-foreground">Total Expenses</p>
+                      <p className="text-xs text-muted-foreground">Business Expenses</p>
                     </div>
                     <p className="text-xl font-display font-bold text-destructive">ZMW {monthlyStats.totalExpenses.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">{monthlyFilteredExpenses.length} entries</p>
+                    <p className="text-xs text-muted-foreground">{monthlyFilteredExpenses.filter(e => (e.category ?? 'business') === 'business').length} entries</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <PiggyBank className="h-4 w-4 text-purple-600" />
+                      <p className="text-xs text-muted-foreground">Owner Drawings</p>
+                    </div>
+                    <p className="text-xl font-display font-bold text-purple-600">ZMW {monthlyStats.ownerDrawings.toFixed(2)}</p>
+                    <p className="text-xs text-muted-foreground">{monthlyFilteredExpenses.filter(e => e.category === 'personal').length} entries</p>
                   </CardContent>
                 </Card>
                 <Card>
