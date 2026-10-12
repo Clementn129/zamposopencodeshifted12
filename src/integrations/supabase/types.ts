@@ -2291,6 +2291,13 @@ export type Database = {
         }
         Returns: string
       }
+      refund_sale: {
+        Args: {
+          p_refund_items: Json
+          p_sale_id: string
+        }
+        Returns: Json
+      }
       reject_stock_adjustment: {
         Args: { p_note?: string; p_request_id: string }
         Returns: string

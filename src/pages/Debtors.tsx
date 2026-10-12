@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { todayLocal } from '@/lib/dates';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ArrowLeft, Plus, Users, DollarSign, Check, Clock, Trash2, Search, Package, CalendarClock } from 'lucide-react';
@@ -72,7 +73,7 @@ const Debtors = () => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [saleDate, setSaleDate] = useState(() => todayLocal());
   const [notes, setNotes] = useState('');
   const { activeProducts, isLoading: productsLoading } = useProducts(business?.id);
   const [productSearch, setProductSearch] = useState('');
@@ -224,7 +225,7 @@ const Debtors = () => {
     setCustomerName('');
     setCustomerPhone('');
     setDueDate('');
-    setSaleDate(new Date().toISOString().slice(0, 10));
+    setSaleDate(todayLocal());
     setNotes('');
     setProductSearch('');
     setCreditCart([]);
@@ -290,7 +291,7 @@ const Debtors = () => {
     setSaving(true);
     try {
       // Back-dating (opt-in): a past date is combined with the current time.
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = todayLocal();
       const now = (canBackdate && saleDate && saleDate < todayIso)
         ? new Date(`${saleDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
         : new Date().toISOString();
@@ -732,12 +733,12 @@ const Debtors = () => {
                       <Label className="flex items-center gap-1"><CalendarClock className="h-4 w-4" /> Sale Date</Label>
                       <Input
                         type="date"
-                        max={new Date().toISOString().slice(0, 10)}
+                        max={todayLocal()}
                         value={saleDate}
                         onChange={e => setSaleDate(e.target.value)}
                       />
                       <p className="text-xs text-muted-foreground">
-                        {saleDate && saleDate < new Date().toISOString().slice(0, 10)
+                        {saleDate && saleDate < todayLocal()
                           ? `Recording this credit sale as ${saleDate}. It will appear in that day's report.`
                           : 'Defaults to today.'}
                       </p>

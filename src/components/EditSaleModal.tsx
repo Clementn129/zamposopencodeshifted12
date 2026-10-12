@@ -8,12 +8,16 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, RotateCcw, Save, Check, Clock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useAuthContext } from '@/contexts/AuthContext';
+import { saleTotals } from '@/lib/saleMath';
 
 type SaleItem = {
   productId: string;
   name: string;
   price: number;
   quantity: number;
+  finalSalePrice?: number | null;
+  costPrice?: number | null;
 };
 
 type Sale = {
@@ -26,6 +30,7 @@ type Sale = {
   synced: boolean;
   status?: 'completed' | 'refunded' | 'partially_refunded';
   discountAmount?: number;
+  taxAmount?: number;
 };
 
 type EditSaleModalProps = {
@@ -37,11 +42,18 @@ type EditSaleModalProps = {
 
 const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalProps) => {
   const { toast } = useToast();
+  const { role } = useAuthContext();
   const [saving, setSaving] = useState(false);
   const [refunding, setRefunding] = useState(false);
   const [items, setItems] = useState<SaleItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [refundItems, setRefundItems] = useState<{ [key: string]: number }>({});
+
+  // Owners/super admins may edit (quantities, payment method) and refund.
+  // Managers may refund but not rewrite the sale. Cashiers can do neither —
+  // the refund_sale RPC re-enforces this server-side regardless.
+  const canEdit = role === 'owner' || role === 'super_admin';
+  const canRefund = canEdit || role === 'manager';
 
   useEffect(() => {
     if (sale) {
@@ -60,8 +72,16 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
   };
 
   const calculateTotals = () => {
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    return { subtotal, total: subtotal };
+    // Discount-aware: `subtotal` stays gross (Σ price×qty, the stored
+    // semantic), `discountAmount` is what the items actually charged off, and
+    // tax/total are rescaled from the sale's own rate on the remaining net.
+    const { subtotal, discountAmount, net } = saleTotals(items);
+    const origNet = Math.max(0, (Number(sale?.subtotal) || 0) - (Number(sale?.discountAmount) || 0));
+    const taxAmount = origNet > 0
+      ? Math.round(net * ((Number(sale?.taxAmount) || 0) / origNet) * 100) / 100
+      : 0;
+    const total = Math.round((net + taxAmount) * 100) / 100;
+    return { subtotal, discountAmount, taxAmount, total };
   };
 
   const handleSave = async () => {
@@ -71,7 +91,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
     }
 
     setSaving(true);
-    const { subtotal, total } = calculateTotals();
+    const { subtotal, discountAmount, taxAmount, total } = calculateTotals();
 
     try {
       const { error } = await supabase
@@ -79,6 +99,8 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
         .update({
           items: items as any,
           subtotal,
+          discount_amount: discountAmount,
+          tax_amount: taxAmount,
           total,
           payment_method: paymentMethod,
         })
@@ -98,17 +120,19 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
   };
 
   const handleRefund = async () => {
-    const itemsToRefund = Object.entries(refundItems).filter(([_, qty]) => qty > 0);
-    
+    const itemsToRefund = Object.entries(refundItems)
+      .filter(([_, qty]) => (qty ?? 0) > 0)
+      .map(([productId, quantity]) => ({ productId, quantity }));
+
     if (itemsToRefund.length === 0) {
       toast({ variant: 'destructive', title: 'Select items', description: 'Choose items to refund' });
       return;
     }
 
     // Validate refund quantities
-    for (const [productId, qty] of itemsToRefund) {
+    for (const { productId, quantity } of itemsToRefund) {
       const originalItem = sale.items.find(i => i.productId === productId);
-      if (originalItem && qty > originalItem.quantity) {
+      if (originalItem && quantity > originalItem.quantity) {
         toast({ variant: 'destructive', title: 'Invalid quantity', description: `Cannot refund more than purchased` });
         return;
       }
@@ -118,55 +142,15 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
 
     setRefunding(true);
     try {
-      // Calculate new items after refund
-      const newItems = sale.items.map(item => {
-        const refundQty = refundItems[item.productId] || 0;
-        return { ...item, quantity: item.quantity - refundQty };
-      }).filter(item => item.quantity > 0);
+      // Server-side, atomic: quantity checks, sale rewrite, stock return
+      // (logged as 'sale_return') and ingredient restore happen in one RPC.
+      const { data, error } = await supabase.rpc('refund_sale', {
+        p_sale_id: sale.id,
+        p_refund_items: itemsToRefund,
+      });
 
-      // Determine new status
-      const isFullRefund = newItems.length === 0;
-      const newStatus = isFullRefund ? 'refunded' : 'partially_refunded';
-
-      // Calculate new totals
-      const newSubtotal = newItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-      const newTotal = newSubtotal;
-
-      // Update sale
-      const { error: saleError } = await supabase
-        .from('sales')
-        .update({
-          items: newItems as any,
-          subtotal: newSubtotal,
-          total: newTotal,
-          status: newStatus,
-        })
-        .eq('id', sale.id)
-        .match(businessId ? { business_id: businessId } : {});
-
-      if (saleError) throw saleError;
-
-      // Return stock to products
-      for (const [productId, qty] of itemsToRefund) {
-        if (qty > 0) {
-          // Get current stock
-          const { data: product } = await supabase
-            .from('products')
-            .select('stock')
-            .eq('id', productId)
-            .match(businessId ? { business_id: businessId } : {})
-            .maybeSingle();
-
-          if (product) {
-            const newStock = Number(product.stock) + qty;
-            await supabase
-              .from('products')
-              .update({ stock: newStock })
-              .eq('id', productId)
-              .match(businessId ? { business_id: businessId } : {});
-          }
-        }
-      }
+      if (error) throw error;
+      if (!data) throw new Error('No refund result returned');
 
       toast({ title: 'Refund Processed', description: 'Stock has been returned' });
       onUpdated();
@@ -178,7 +162,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
     }
   };
 
-  const { subtotal, total } = calculateTotals();
+  const { subtotal, discountAmount, taxAmount, total } = calculateTotals();
   const status = sale.status || 'completed';
 
   const getStatusBadge = () => {
@@ -221,7 +205,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
                       value={item.quantity}
                       onChange={(e) => updateItemQuantity(idx, parseInt(e.target.value) || 0)}
                       className="w-16 h-8 text-center"
-                      disabled={status === 'refunded'}
+                      disabled={status === 'refunded' || !canEdit}
                     />
                   </div>
                 </div>
@@ -234,7 +218,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
             </div>
           </div>
 
-          {status === 'completed' && (
+          {status === 'completed' && canEdit && (
             <div className="space-y-2">
               <Label>Payment Method</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
@@ -254,10 +238,16 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
               <span>Subtotal</span>
               <span>ZMW {subtotal.toFixed(2)}</span>
             </div>
-            {sale.discountAmount && sale.discountAmount > 0 && (
+            {discountAmount > 0 && (
               <div className="flex justify-between text-sm text-green-600">
                 <span>Discount</span>
-                <span>-ZMW {sale.discountAmount.toFixed(2)}</span>
+                <span>-ZMW {discountAmount.toFixed(2)}</span>
+              </div>
+            )}
+            {taxAmount > 0 && (
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>Tax</span>
+                <span>ZMW {taxAmount.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold text-lg mt-1">
@@ -267,7 +257,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
           </div>
 
           {/* Refund Section */}
-          {status === 'completed' && (
+          {status === 'completed' && canRefund && (
             <div className="border-t pt-4">
               <Label className="mb-2 block">Refund Items (select quantities)</Label>
               <div className="space-y-2 max-h-32 overflow-y-auto">
@@ -292,7 +282,7 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
           )}
 
           <div className="flex gap-2">
-            {status === 'completed' && (
+            {status === 'completed' && canRefund && (
               <>
                 <Button 
                   variant="destructive" 
@@ -308,23 +298,25 @@ const EditSaleModal = ({ sale, businessId, onClose, onUpdated }: EditSaleModalPr
                     </>
                   )}
                 </Button>
-                <Button 
-                  variant="pos" 
-                  className="flex-1"
-                  onClick={handleSave}
-                  disabled={saving || refunding || items.length === 0}
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4 mr-2" /> Save
-                    </>
-                  )}
-                </Button>
+                {canEdit && (
+                  <Button 
+                    variant="pos" 
+                    className="flex-1"
+                    onClick={handleSave}
+                    disabled={saving || refunding || items.length === 0}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" /> Save
+                      </>
+                    )}
+                  </Button>
+                )}
               </>
             )}
-            {status !== 'completed' && (
+            {!(status === 'completed' && canRefund) && (
               <Button variant="outline" className="w-full" onClick={onClose}>
                 Close
               </Button>

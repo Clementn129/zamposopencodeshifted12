@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { todayLocal } from '@/lib/dates';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Pencil, HardHat, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,7 @@ const Capex = () => {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<string>('equipment');
   const [vendor, setVendor] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [purchaseDate, setPurchaseDate] = useState(() => todayLocal());
   const [notes, setNotes] = useState('');
 
   const load = useCallback(async () => {
@@ -103,7 +104,7 @@ const Capex = () => {
     setAmount('');
     setCategory('equipment');
     setVendor('');
-    setPurchaseDate(new Date().toISOString().slice(0, 10));
+    setPurchaseDate(todayLocal());
     setNotes('');
     setEditing(null);
   };

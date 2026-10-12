@@ -203,8 +203,10 @@ const Reports = () => {
           return t >= from && t <= to;
         }));
         setExpenses(cachedExpenses.filter(e => {
-          const t = new Date(e.expense_date).getTime();
-          return t >= from && t <= to;
+          // Compare date labels the same way the online query does (Lusaka
+          // calendar date), so cached and live reports agree.
+          return e.expense_date >= lusakaDateLabel(range.from)
+            && e.expense_date <= lusakaDateLabel(range.to);
         }));
         setDebtors(cachedDebtors.map(d => ({ id: d.id, amount_owed: d.amountOwed, amount_paid: d.amountPaid, balance_due: d.amountOwed - d.amountPaid, status: d.status })));
         setStock(cachedProducts.map((p) => ({

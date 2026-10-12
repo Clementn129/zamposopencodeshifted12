@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, startOfDay, startOfMonth, endOfDay, endOfMonth } from 'date-fns';
+import { parseDateString } from '@/lib/dates';
 import { Plus, Trash2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -171,7 +172,7 @@ const ExpensesSection = ({ businessId, isOnline: isOnlineProp, onExpenseChanged 
     const todayEnd = endOfDay(new Date());
     return businessExpenses
       .filter(e => {
-        const d = new Date(e.expenseDate);
+        const d = parseDateString(e.expenseDate);
         return d >= today && d <= todayEnd;
       })
       .reduce((sum, e) => sum + e.amount, 0);
@@ -182,7 +183,7 @@ const ExpensesSection = ({ businessId, isOnline: isOnlineProp, onExpenseChanged 
     const monthEnd = endOfMonth(new Date());
     return businessExpenses
       .filter(e => {
-        const d = new Date(e.expenseDate);
+        const d = parseDateString(e.expenseDate);
         return d >= monthStart && d <= monthEnd;
       })
       .reduce((sum, e) => sum + e.amount, 0);
@@ -392,7 +393,7 @@ const ExpensesSection = ({ businessId, isOnline: isOnlineProp, onExpenseChanged 
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
-                    {format(new Date(exp.expenseDate), 'MMM d, yyyy')}
+                    {format(parseDateString(exp.expenseDate), 'MMM d, yyyy')}
                     {exp.notes && ` • ${exp.notes}`}
                   </p>
                 </div>

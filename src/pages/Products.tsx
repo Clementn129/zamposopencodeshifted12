@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { todayLocal } from "@/lib/dates";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -129,7 +130,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [stockAdjustment, setStockAdjustment] = useState("");
   const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
-  const [adjustDate, setAdjustDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [adjustDate, setAdjustDate] = useState(() => todayLocal());
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -605,7 +606,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setSelectedProduct(p);
     setStockAdjustment("");
     setAdjustmentType("add");
-    setAdjustDate(new Date().toISOString().slice(0, 10));
+    setAdjustDate(todayLocal());
     setStockAdjustOpen(true);
   };
 
@@ -623,7 +624,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
       : Math.max(0, selectedProduct.stock + stockChange);
 
     // Back-dating (opt-in): a past date is combined with the current time.
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayLocal();
     const backdated = canBackdate && !!adjustDate && adjustDate < todayIso;
     const effectiveIso = backdated
       ? new Date(`${adjustDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
@@ -1797,12 +1798,12 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                 </Label>
                 <Input
                   type="date"
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={todayLocal()}
                   value={adjustDate}
                   onChange={(e) => setAdjustDate(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {adjustDate && adjustDate < new Date().toISOString().slice(0, 10)
+                  {adjustDate && adjustDate < todayLocal()
                     ? `Recording this stock change on ${adjustDate}.`
                     : "Defaults to today."}
                 </p>

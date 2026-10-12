@@ -3,6 +3,7 @@ import { AlertTriangle, ClipboardList, Bell, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { todayLocal, localDayBounds } from '@/lib/dates';
 import { Link } from 'react-router-dom';
 
 type Notification = {
@@ -28,7 +29,7 @@ const getDismissedToday = (): string[] => {
     const stored = localStorage.getItem(DISMISSED_KEY);
     if (!stored) return [];
     const { date, ids } = JSON.parse(stored);
-    if (date !== new Date().toISOString().split('T')[0]) return [];
+    if (date !== todayLocal()) return [];
     return ids || [];
   } catch {
     return [];
@@ -36,7 +37,7 @@ const getDismissedToday = (): string[] => {
 };
 
 const dismissNotification = (id: string) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const current = getDismissedToday();
   localStorage.setItem(DISMISSED_KEY, JSON.stringify({ date: today, ids: [...current, id] }));
 };
@@ -68,13 +69,13 @@ const DashboardNotifications = ({ businessId, daysRemaining, subscriptionStatus,
 
       // 2. Daily stock recording reminder (only for retail businesses)
       if (!isService && !dismissed.includes('stock_reminder')) {
-        const today = new Date().toISOString().split('T')[0];
+        const { from: todayStartIso, to: todayEndIso } = localDayBounds();
         const { count } = await supabase
           .from('sales')
           .select('id', { count: 'exact', head: true })
           .eq('business_id', businessId)
-          .gte('created_at', `${today}T00:00:00`)
-          .lte('created_at', `${today}T23:59:59`);
+          .gte('created_at', todayStartIso)
+          .lte('created_at', todayEndIso);
 
         if (count === 0) {
           notifs.push({

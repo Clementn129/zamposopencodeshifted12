@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { todayLocal } from "@/lib/dates";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -55,7 +56,7 @@ const StockRequests = () => {
   const [kind, setKind] = useState<"add" | "remove">("add");
   const [qty, setQty] = useState("1");
   const [reason, setReason] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [effectiveDate, setEffectiveDate] = useState(() => todayLocal());
   const [saving, setSaving] = useState(false);
 
   const [mine, setMine] = useState<MyRequest[]>([]);
@@ -112,7 +113,7 @@ const StockRequests = () => {
     setKind("add");
     setQty("1");
     setReason("");
-    setEffectiveDate(new Date().toISOString().slice(0, 10));
+    setEffectiveDate(todayLocal());
     setOpen(true);
   };
 
@@ -126,7 +127,7 @@ const StockRequests = () => {
     setSaving(true);
     try {
       // Back-dating (opt-in): a past date is combined with the current time.
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = todayLocal();
       const effectiveIso = (canBackdate && effectiveDate && effectiveDate < todayIso)
         ? new Date(`${effectiveDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
         : null;
@@ -348,12 +349,12 @@ const StockRequests = () => {
                 <Input
                   id="stock-date"
                   type="date"
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={todayLocal()}
                   value={effectiveDate}
                   onChange={(e) => setEffectiveDate(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {effectiveDate && effectiveDate < new Date().toISOString().slice(0, 10)
+                  {effectiveDate && effectiveDate < todayLocal()
                     ? `Back-dated to ${effectiveDate}. The owner can change it before approving.`
                     : "Defaults to today."}
                 </p>

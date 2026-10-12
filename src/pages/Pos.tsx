@@ -36,6 +36,7 @@ import { calculateTax, TaxCategory } from "@/lib/tax";
 import { openCashDrawerIfEnabled } from "@/lib/cashDrawer";
 import { supabase } from "@/integrations/supabase/client";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
+import { todayLocal } from "@/lib/dates";
 
 type CartLine = { 
   lineId: string; 
@@ -128,7 +129,7 @@ const Pos = () => {
   const [paymentMode, setPaymentMode] = useState<"full" | "partial" | "credit">("full");
   const [partialAmount, setPartialAmount] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [saleDate, setSaleDate] = useState(() => todayLocal());
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerTpin, setCustomerTpin] = useState("");
@@ -209,7 +210,7 @@ const Pos = () => {
     return Math.max(0, Math.min(value, subtotal));
   }, [subtotal, saleDiscountType, saleDiscountValue]);
 
-  const total = subtotal - discountAmount;
+  const total = Math.round((subtotal - discountAmount) * 100) / 100;
 
   const changeDue = useMemo(() => {
     const received = Number(amountReceived) || 0;
@@ -554,7 +555,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     setPaymentMode("full");
     setPartialAmount("");
     setDueDate("");
-    setSaleDate(new Date().toISOString().slice(0, 10));
+    setSaleDate(todayLocal());
     setCustomerName("");
     setCustomerPhone("");
     setCustomerTpin("");
@@ -571,7 +572,10 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     const linesAfterItemDisc = cart.map((l) => {
       const gross = l.price * l.quantity;
       let net = gross;
-      if (l.discountType === 'percentage' && l.discountValue) net = gross * (1 - l.discountValue / 100);
+      if (l.discountType === 'percentage' && l.discountValue) {
+        const pct = Math.min(100, Math.max(0, l.discountValue));
+        net = gross * (1 - pct / 100);
+      }
       else if (l.discountType === 'amount' && l.discountValue) net = Math.max(0, gross - l.discountValue);
       return { amount: net, taxCategory: (l.taxCategory || 'taxable') as TaxCategory };
     });
@@ -640,7 +644,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     const saleId = generateOfflineId();
     // Back-dating (opt-in): a past date is combined with the current time so the
     // sale sorts correctly within that day. Today or future falls back to now().
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayLocal();
     const createdAt = (canBackdate && saleDate && saleDate < todayIso)
       ? new Date(`${saleDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
       : new Date().toISOString();
@@ -1520,12 +1524,12 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                             </Label>
                             <Input
                               type="date"
-                              max={new Date().toISOString().slice(0, 10)}
+                              max={todayLocal()}
                               value={saleDate}
                               onChange={(e) => setSaleDate(e.target.value)}
                             />
                             <p className="text-xs text-muted-foreground">
-                              {saleDate && saleDate < new Date().toISOString().slice(0, 10)
+                              {saleDate && saleDate < todayLocal()
                                 ? `Recording this sale as ${saleDate}. It will appear in that day's report.`
                                 : "Defaults to today."}
                             </p>

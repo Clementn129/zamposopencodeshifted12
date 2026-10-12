@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { todayLocal } from "@/lib/dates";
 
 type Request = {
   id: string;
@@ -56,7 +57,7 @@ const PendingStockRequests = ({ businessId, products, onApproved }: Props) => {
     try {
       const fn = approve ? "approve_stock_adjustment" : "reject_stock_adjustment";
       const req = requests.find((r) => r.id === id);
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = todayLocal();
       const chosen = dates[id] ?? (req?.effective_at ? req.effective_at.slice(0, 10) : "");
       // Owner-editable back-date; a future date is ignored (falls back to now()).
       const effectiveIso = approve && chosen && chosen < todayIso
@@ -121,8 +122,8 @@ const PendingStockRequests = ({ businessId, products, onApproved }: Props) => {
                 <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   type="date"
-                  max={new Date().toISOString().slice(0, 10)}
-                  value={dates[r.id] ?? (r.effective_at ? r.effective_at.slice(0, 10) : new Date().toISOString().slice(0, 10))}
+                  max={todayLocal()}
+                  value={dates[r.id] ?? (r.effective_at ? r.effective_at.slice(0, 10) : todayLocal())}
                   onChange={(e) => setDates((d) => ({ ...d, [r.id]: e.target.value }))}
                   className="h-8 text-xs w-[150px]"
                 />

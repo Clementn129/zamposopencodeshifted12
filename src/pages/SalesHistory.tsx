@@ -21,7 +21,9 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { supabase } from "@/integrations/supabase/client";
 import { getUnsyncedSales, cacheSalesHistory, getCachedSalesHistory, cacheExpenses, getCachedExpenses, cacheDebtorPayments, getCachedDebtorPayments, markSaleAsSynced, generateOfflineId, queuePendingOp } from "@/lib/offlineStorage";
 import { exportSalesToCsv } from "@/lib/csvExport";
+import { dateString, parseDateString } from "@/lib/dates";
 import { useToast } from "@/hooks/use-toast";
+import { lineRevenue, lineCost, lineQty } from "@/lib/saleMath";
 
 
 type SaleItem = {
@@ -30,6 +32,7 @@ type SaleItem = {
   price: number;
   quantity: number;
   costPrice?: number | null;
+  finalSalePrice?: number | null;
   discountType?: string | null;
   discountValue?: number;
 };
@@ -187,8 +190,8 @@ const SalesHistory = () => {
           .eq("business_id", business.id)
           .order("expense_date", { ascending: false })
           .limit(PAGE_LIMIT);
-        if (dateWindow.from) expQ = expQ.gte("expense_date", dateWindow.from.slice(0, 10));
-        if (dateWindow.to) expQ = expQ.lte("expense_date", dateWindow.to.slice(0, 10));
+        if (dateWindow.from) expQ = expQ.gte("expense_date", dateString(new Date(dateWindow.from)));
+        if (dateWindow.to) expQ = expQ.lte("expense_date", dateString(new Date(dateWindow.to)));
         const { data: expensesData, error: expensesError } = await expQ;
 
         if (!expensesError && expensesData) {
@@ -402,7 +405,7 @@ const SalesHistory = () => {
         return expenses;
     }
 
-    return expenses.filter((e) => new Date(e.expense_date) >= startDate);
+    return expenses.filter((e) => parseDateString(e.expense_date) >= startDate);
   }, [expenses, period]);
 
   // Monthly filtered data
@@ -430,7 +433,7 @@ const SalesHistory = () => {
     const monthEnd = endOfMonth(targetDate);
     
     return expenses.filter((e) => {
-      const expenseDate = new Date(e.expense_date);
+      const expenseDate = parseDateString(e.expense_date);
       return expenseDate >= monthStart && expenseDate <= monthEnd;
     });
   }, [expenses, selectedMonth, selectedYear]);
@@ -716,22 +719,15 @@ const SalesHistory = () => {
   };
 
 
-  // Calculate item profit for display
+  // Calculate item profit for display. Revenue is discount-aware: modern items
+  // carry `finalSalePrice` (per-unit, discount already apportioned); legacy
+  // items fall back to the sale-level discount share inside `lineRevenue`.
   const calculateItemProfit = (sale: Sale, item: SaleItem) => {
     const costPrice = Number(item.costPrice) || 0;
     if (costPrice === 0) return null;
-    
-    const sellingPrice = Number(item.price) || 0;
-    const qty = Number(item.quantity) || 0;
-    const saleDiscount = Number(sale.discountAmount) || 0;
-    const saleSubtotal = Number(sale.subtotal) || 0;
-    const itemTotal = sellingPrice * qty;
-    
-    const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
-    const itemRevenue = itemTotal - itemDiscountShare;
-    const itemCost = costPrice * qty;
-    
-    return itemRevenue - itemCost;
+
+    const revenue = lineRevenue(item, Number(sale.subtotal) || 0, Number(sale.discountAmount) || 0);
+    return revenue - lineCost(item);
   };
 
   // Generate year options (last 5 years to current)
@@ -1141,8 +1137,8 @@ const SalesHistory = () => {
                       if (sale.status === 'refunded') continue;
                       for (const item of sale.items) {
                         const existing = aggregated.get(item.name) || { qty: 0, revenue: 0 };
-                        existing.qty += item.quantity;
-                        existing.revenue += item.quantity * item.price;
+                        existing.qty += lineQty(item);
+                        existing.revenue += lineRevenue(item, Number(sale.subtotal) || 0, Number(sale.discountAmount) || 0);
                         aggregated.set(item.name, existing);
                       }
                     }
@@ -1385,8 +1381,8 @@ const SalesHistory = () => {
                       if (sale.status === 'refunded') continue;
                       for (const item of sale.items) {
                         const existing = aggregated.get(item.name) || { qty: 0, revenue: 0 };
-                        existing.qty += item.quantity;
-                        existing.revenue += item.quantity * item.price;
+                        existing.qty += lineQty(item);
+                        existing.revenue += lineRevenue(item, Number(sale.subtotal) || 0, Number(sale.discountAmount) || 0);
                         aggregated.set(item.name, existing);
                       }
                     }
@@ -1431,7 +1427,7 @@ const SalesHistory = () => {
                         <div>
                           <p className="font-medium">{expense.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {format(new Date(expense.expense_date), "MMM d, yyyy")}
+                            {format(parseDateString(expense.expense_date), "MMM d, yyyy")}
                           </p>
                           {expense.notes && (
                             <p className="text-xs text-muted-foreground">{expense.notes}</p>

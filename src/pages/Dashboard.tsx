@@ -4,6 +4,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useBusiness } from '@/hooks/useBusiness';
 import { useBusinessContext } from '@/hooks/BusinessContext';
 import { useBusinessType } from '@/hooks/useBusinessType';
+import { todayLocal, localDayBounds } from '@/lib/dates';
 import { BranchSwitcher } from '@/components/BranchSwitcher';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { Button } from '@/components/ui/button';
@@ -40,13 +41,13 @@ const Dashboard = () => {
 
   const checkHasSalesToday = useCallback(async () => {
     if (!business?.id) return;
-    const today = new Date().toISOString().split('T')[0];
+    const { from, to } = localDayBounds();
     supabase
       .from('sales')
       .select('id', { count: 'exact', head: true })
       .eq('business_id', business.id)
-      .gte('created_at', `${today}T00:00:00`)
-      .lte('created_at', `${today}T23:59:59`)
+      .gte('created_at', from)
+      .lte('created_at', to)
       .then(({ count }) => setHasSalesToday((count ?? 0) > 0))
       .catch(() => {});
   }, [business?.id]);
@@ -64,8 +65,8 @@ const Dashboard = () => {
 
   const checkExpiringProducts = useCallback(async () => {
     if (!business?.id || isService) return;
-    const today = new Date().toISOString().split('T')[0];
-    const future = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const today = todayLocal();
+    const future = todayLocal(new Date(Date.now() + 30 * 86400000));
     supabase
       .from('products')
       .select('name, expiry_date')

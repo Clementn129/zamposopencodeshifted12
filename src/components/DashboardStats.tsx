@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { formatZMW } from '@/lib/currency';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { getCachedSalesHistory, getCachedExpenses, getCachedDebtors, getCachedProducts } from '@/lib/offlineStorage';
+import { todayLocal, localDayBounds, parseDateString } from '@/lib/dates';
 import {
   TrendingUp,
   ShoppingCart,
@@ -41,7 +42,8 @@ const DashboardStats = ({ businessId, isService }: DashboardStatsProps) => {
 
   const fetchStats = useCallback(async () => {
     if (!businessId) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayLocal();
+    const { from: todayStartIso, to: todayEndIso } = localDayBounds();
 
     if (!isOnline) {
       const [cachedSales, cachedExpenses, cachedDebtors, cachedProducts] = await Promise.all([
@@ -62,7 +64,7 @@ const DashboardStats = ({ businessId, isService }: DashboardStatsProps) => {
       });
 
       const todaysExpenses = cachedExpenses.filter(e => {
-        const t = new Date(e.expense_date).getTime();
+        const t = parseDateString(e.expense_date).getTime();
         return t >= todayStart.getTime() && t <= todayEnd.getTime();
       });
 
@@ -97,8 +99,8 @@ const DashboardStats = ({ businessId, isService }: DashboardStatsProps) => {
         .select('total')
         .eq('business_id', businessId)
         .eq('status', 'completed')
-        .gte('created_at', `${today}T00:00:00`)
-        .lte('created_at', `${today}T23:59:59`),
+        .gte('created_at', todayStartIso)
+        .lte('created_at', todayEndIso),
       supabase
         .from('debtors')
         .select('amount_owed, amount_paid')

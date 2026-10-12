@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { todayLocal } from '@/lib/dates';
 
 const LAST_PUSH_KEY = 'zampos_last_push_check';
 
@@ -48,7 +49,7 @@ export const usePushNotifications = (
   const checkAndNotify = useCallback(async () => {
     if (isInIframe || isPreviewHost) return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayLocal();
     const lastCheck = localStorage.getItem(LAST_PUSH_KEY);
     if (lastCheck === today) return;
 
