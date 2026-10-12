@@ -242,6 +242,8 @@ export type Database = {
         Row: {
           auth_user_id: string
           business_id: string
+          can_adjust_stock: boolean
+          can_backdate: boolean
           created_at: string
           display_name: string | null
           id: string
@@ -254,6 +256,8 @@ export type Database = {
         Insert: {
           auth_user_id: string
           business_id: string
+          can_adjust_stock?: boolean
+          can_backdate?: boolean
           created_at?: string
           display_name?: string | null
           id?: string
@@ -266,6 +270,8 @@ export type Database = {
         Update: {
           auth_user_id?: string
           business_id?: string
+          can_adjust_stock?: boolean
+          can_backdate?: boolean
           created_at?: string
           display_name?: string | null
           id?: string
@@ -298,6 +304,7 @@ export type Database = {
           allow_backdating: boolean
           allow_cart_price_edit: boolean
           business_type: string
+          capex_enabled: boolean
           created_at: string
           custom_tax_name: string | null
           custom_tax_rate: number | null
@@ -306,6 +313,7 @@ export type Database = {
           is_locked: boolean
           last_sync_at: string
           logo_url: string | null
+          monthly_price_zmw: number | null
           name: string
           parent_business_id: string | null
           payment_code: string
@@ -331,6 +339,7 @@ export type Database = {
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
           business_type?: string
+          capex_enabled?: boolean
           created_at?: string
           custom_tax_name?: string | null
           custom_tax_rate?: number | null
@@ -339,6 +348,7 @@ export type Database = {
           is_locked?: boolean
           last_sync_at?: string
           logo_url?: string | null
+          monthly_price_zmw?: number | null
           name: string
           parent_business_id?: string | null
           payment_code: string
@@ -364,6 +374,7 @@ export type Database = {
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
           business_type?: string
+          capex_enabled?: boolean
           created_at?: string
           custom_tax_name?: string | null
           custom_tax_rate?: number | null
@@ -372,6 +383,7 @@ export type Database = {
           is_locked?: boolean
           last_sync_at?: string
           logo_url?: string | null
+          monthly_price_zmw?: number | null
           name?: string
           parent_business_id?: string | null
           payment_code?: string
@@ -393,6 +405,53 @@ export type Database = {
           vat_rate?: number
         }
         Relationships: []
+      }
+      capex: {
+        Row: {
+          amount: number
+          business_id: string
+          capex_category: string
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          purchase_date: string
+          updated_at: string
+          vendor: string | null
+        }
+        Insert: {
+          amount: number
+          business_id: string
+          capex_category: string
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          purchase_date?: string
+          updated_at?: string
+          vendor?: string | null
+        }
+        Update: {
+          amount?: number
+          business_id?: string
+          capex_category?: string
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          purchase_date?: string
+          updated_at?: string
+          vendor?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capex_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       debtor_payments: {
         Row: {
@@ -2229,7 +2288,7 @@ export type Database = {
       generate_quotation_number: { Args: { biz_id: string }; Returns: string }
       get_affiliate_by_code: { Args: { code: string }; Returns: string }
       get_my_business_id: { Args: never; Returns: string }
-      get_my_business_group: { Returns: Array<{
+      get_my_business_group: { Args: never; Returns: Array<{
         branch_kind: string
         business_type: string
         id: string

@@ -86,7 +86,7 @@ const Settings = () => {
   };
 
   const handleTestDrawer = () => {
-    setDrawerPin(drawerPinState);
+    setDrawerPin(drawerPin);
     const result = openCashDrawer();
     if (result === 'OK') {
       toast({ title: 'Cash drawer opened', description: 'If it did not move, check the drawer cable and pin number.' });

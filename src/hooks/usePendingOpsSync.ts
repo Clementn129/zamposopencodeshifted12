@@ -258,17 +258,19 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               // Cashiers have no INSERT rights on products (RLS is owner-only), so a
               // quick-add made offline must replay through the member-callable function.
               const isQuickAdd = op.payload.quickAdd === true;
-              // True once the product was created via quick_add_product (untracked and
-              // relinked server-side through p_temp_id), so the tracked-stock fixup
+              // True once the product was created via quick_add_product (counted now,
+              // and relinked server-side through p_temp_id), so the temp-id stock fixup
               // below is skipped.
               let viaQuickAdd = isQuickAdd;
               let newProductId: string | undefined;
 
               const quickAdd = async () => {
+                const p_stock = Math.max(0, Math.floor(Number(op.payload.stock ?? 0)));
                 const withTemp = await (supabase.rpc as any)('quick_add_product', {
                   p_business_id: businessId,
                   p_name: op.payload.name,
                   p_price: op.payload.price,
+                  p_stock,
                   p_temp_id: tempId || null,
                 });
                 if (withTemp.error && isMissingFunctionError(withTemp.error)) {
@@ -276,6 +278,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                     p_business_id: businessId,
                     p_name: op.payload.name,
                     p_price: op.payload.price,
+                    p_stock,
                   });
                 }
                 return withTemp;
@@ -325,8 +328,9 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
 
               // If this product was created offline with a temp ID, any sales that synced
               // before this product existed will have items referencing the temp ID.
-              // Decrement stock for those sales now. Quick-adds are untracked (stock 0)
-              // and relink their sales inside quick_add_product, so they skip this fixup.
+              // Decrement stock for those sales now. Quick-adds replay through
+              // quick_add_product (which receives the stock and relinks their sales), so
+              // they skip this fixup.
               if (tempId && newProductId && !viaQuickAdd) {
                 try {
                   const { data: affectedSales } = await supabase
@@ -495,7 +499,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               if (debtorData) {
                 const { data: saleData } = await supabase.from('sales').select('items').eq('id', debtorData.sale_id).eq('business_id', businessId).maybeSingle();
                 if (saleData?.items && Array.isArray(saleData.items)) {
-                  const saleItems: Array<{ productId: string; quantity: number }> = saleData.items;
+                  const saleItems = (saleData.items as unknown) as Array<{ productId: string; quantity: number }>;
                   const restoreByProduct = new Map<string, number>();
                   for (const item of saleItems) {
                     if (!item?.productId) continue;
@@ -762,7 +766,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
         }
 
         window.dispatchEvent(new CustomEvent("zampos:sync-complete"));
-        supabase.from('businesses').update({ last_sync_at: new Date().toISOString() }).eq('id', businessId).then(() => {}).catch(() => {});
+        supabase.from('businesses').update({ last_sync_at: new Date().toISOString() }).eq('id', businessId).then(() => {}, () => {});
         setLastSyncAt(new Date().toISOString());
       }
     } catch (e) {

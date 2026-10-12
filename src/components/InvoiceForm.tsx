@@ -185,6 +185,7 @@ const InvoiceForm = ({ products, existingInvoice, prefill, businessDetails, onSa
         discountAmount: globalDiscount,
         taxAmount,
         total,
+        paymentMethod: existingInvoice?.paymentMethod ?? 'credit',
         status,
         issuedDate,
         dueDate: dueDate || null,

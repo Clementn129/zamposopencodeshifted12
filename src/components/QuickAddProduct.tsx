@@ -30,25 +30,29 @@ interface QuickAddProductProps {
   onResolved: (product: Product) => void;
 }
 
-/** The untracked skeleton handed back before the server has confirmed anything. */
+/** The counted skeleton handed back before the server has confirmed anything. */
 const buildProduct = (
   id: string,
   businessId: string,
   name: string,
   price: number,
+  stock: number,
 ): Product => ({
   id,
   businessId,
   name,
   price,
   costPrice: null,
-  stock: 0,
+  stock,
   minimumStock: 0,
   category: null,
   barcode: null,
   isActive: true,
   itemType: 'product',
-  trackStock: false,
+  isDish: false,
+  // Counted inventory: quick-added items now obey the prevent-negative-stock
+  // toggle like any other product.
+  trackStock: true,
   taxCategory: 'taxable',
   imageUrl: null,
   imagePath: null,
@@ -67,6 +71,7 @@ const QuickAddProduct = ({
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [quantity, setQuantity] = useState('1');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -75,6 +80,7 @@ const QuickAddProduct = ({
     if (open) {
       setName('');
       setPrice('');
+      setQuantity('1');
       setError(null);
       setBusy(false);
       const t = setTimeout(() => nameRef.current?.focus(), 80);
@@ -87,6 +93,8 @@ const QuickAddProduct = ({
   const duplicate = trimmed ? products.find((p) => p.name.trim() === trimmed) : undefined;
   const priceNum = Number(price);
   const priceValid = price.trim() !== '' && Number.isFinite(priceNum) && priceNum >= 0;
+  const stockNum = Math.floor(Number(quantity));
+  const stockValid = quantity.trim() !== '' && Number.isFinite(stockNum) && stockNum >= 0;
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -99,6 +107,10 @@ const QuickAddProduct = ({
     }
     if (!priceValid) {
       setError('Enter a price of 0 or more.');
+      return;
+    }
+    if (!stockValid) {
+      setError('Enter a quantity of 0 or more.');
       return;
     }
 
@@ -114,15 +126,16 @@ const QuickAddProduct = ({
     try {
       if (isOnline) {
         // Direct INSERT is owner-only (RLS), so cashiers have to go through the
-        // member-callable function, which only ever creates an untracked item.
+        // member-callable function, which creates a counted item.
         const { data: newId, error: rpcErr } = await supabase.rpc('quick_add_product', {
           p_business_id: businessId,
           p_name: trimmed,
           p_price: priceNum,
+          p_stock: stockNum,
         });
         if (rpcErr) throw rpcErr;
         if (!newId) throw new Error('Product was created but no id came back.');
-        onResolved(buildProduct(newId, businessId, trimmed, priceNum));
+        onResolved(buildProduct(newId, businessId, trimmed, priceNum, stockNum));
         onOpenChange(false);
         return;
       }
@@ -139,7 +152,7 @@ const QuickAddProduct = ({
           name: trimmed,
           price: priceNum,
           costPrice: null,
-          stock: 0,
+          stock: stockNum,
           minimumStock: 0,
           category: null,
           barcode: null,
@@ -149,7 +162,7 @@ const QuickAddProduct = ({
           imagePath: null,
           parentId: null,
           variantLabel: null,
-          trackStock: false,
+          trackStock: true,
           trackExpiry: false,
           expiryDate: null,
         },
@@ -165,20 +178,20 @@ const QuickAddProduct = ({
           name: trimmed,
           price: priceNum,
           cost_price: null,
-          stock: 0,
+          stock: stockNum,
           minimum_stock: 0,
           category: null,
           tax_category: 'taxable',
           barcode: null,
           item_type: 'product',
           track_expiry: false,
-          track_stock: false,
+          track_stock: true,
           image_url: null,
           expiry_date: null,
         },
         createdAt: new Date().toISOString(),
       });
-      onResolved(buildProduct(tempId, businessId, trimmed, priceNum));
+      onResolved(buildProduct(tempId, businessId, trimmed, priceNum, stockNum));
       onOpenChange(false);
     } catch (err: unknown) {
       // Supabase throws plain PostgrestError objects, not Error instances.
@@ -201,8 +214,7 @@ const QuickAddProduct = ({
         <DialogHeader>
           <DialogTitle>Quick sale</DialogTitle>
           <DialogDescription>
-            Add an item you have not set up yet. It will not be counted in stock until you enter a
-            quantity in Products.
+            Add an item you have not set up yet. Enter how many you have so it is counted in stock.
           </DialogDescription>
         </DialogHeader>
 
@@ -241,6 +253,23 @@ const QuickAddProduct = ({
                 if (error) setError(null);
               }}
               placeholder="0.00"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="quickadd-quantity">Quantity in stock</Label>
+            <Input
+              id="quickadd-qty"
+              type="number"
+              min={0}
+              step="1"
+              inputMode="numeric"
+              value={quantity}
+              onChange={(e) => {
+                setQuantity(e.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="1"
             />
           </div>
 

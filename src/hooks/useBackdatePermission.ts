@@ -55,8 +55,7 @@ export const useBackdatePermission = () => {
           return;
         }
         setCanBackdate(data?.can_backdate === true);
-      })
-      .catch(() => {
+      }, () => {
         if (!cancelled) setCanBackdate(false);
       });
 

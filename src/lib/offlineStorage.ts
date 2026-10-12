@@ -393,7 +393,7 @@ const getDB = (): Promise<IDBDatabase> => {
         const db = await initDB();
         if ((db as any).readyState === 'closing') {
           dbInstance = null;
-          setTimeout(() => attempt().then(resolve).catch(reject), 10);
+          setTimeout(() => { attempt().catch(reject); }, 10);
           return;
         }
         resolve(db);
@@ -1181,12 +1181,57 @@ export const clearAccountCaches = async (): Promise<void> => {
   }
 };
 
+const toHex = (buf: ArrayBuffer): string =>
+  Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+const hexToBytes = (hex: string): Uint8Array => {
+  const out = new Uint8Array(Math.floor(hex.length / 2));
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+};
+
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_VERSION = 'pbkdf2';
+
+const derivePbkdf2 = async (password: string, saltHex: string, iterations: number): Promise<string> => {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations, hash: 'SHA-256' },
+    keyMaterial,
+    256,
+  );
+  return toHex(bits);
+};
+
+/**
+ * Current scheme: PBKDF2-SHA256, 100k iterations, random 16-byte salt.
+ * Encoded as `pbkdf2$<iterations>$<saltHex>$<derivedHex>` so a future
+ * iteration bump stays backward-verifiable without another migration.
+ */
 export const hashPassword = async (password: string): Promise<string> => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const salt = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  const derived = await derivePbkdf2(password, salt, PBKDF2_ITERATIONS);
+  return `${PBKDF2_VERSION}$${PBKDF2_ITERATIONS}$${salt}$${derived}`;
+};
+
+/** Legacy unsalted SHA-256 hex, kept only to verify (and then re-hash) old records. */
+const hashPasswordLegacy = async (password: string): Promise<string> => {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return toHex(hashBuffer);
+};
+
+// Constant-time-ish comparison to avoid leaking hash match position via timing.
+const timingSafeEqual = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 };
 
 export const cacheOfflineCredentials = async (user: OfflineUser): Promise<void> => {
@@ -1203,21 +1248,34 @@ export const cacheOfflineCredentials = async (user: OfflineUser): Promise<void> 
 export const verifyOfflineCredentials = async (email: string, password: string): Promise<OfflineUser | null> => {
   try {
     const db = await getDB();
-    const passwordHash = await hashPassword(password);
-    return new Promise((resolve) => {
+    const user = await new Promise<OfflineUser | null>((resolve) => {
       const transaction = db.transaction(['offline_users'], 'readonly');
       const store = transaction.objectStore('offline_users');
       const request = store.get(email);
-      request.onsuccess = () => {
-        const user = request.result;
-        if (user && user.passwordHash === passwordHash) {
-          resolve(user);
-        } else {
-          resolve(null);
-        }
-      };
+      request.onsuccess = () => resolve((request.result as OfflineUser) ?? null);
       request.onerror = () => resolve(null);
     });
+    if (!user || typeof user.passwordHash !== 'string') return null;
+
+    const stored = user.passwordHash;
+    if (stored.startsWith(`${PBKDF2_VERSION}$`)) {
+      const [, iterationsStr, salt, derived] = stored.split('$');
+      const iterations = Number(iterationsStr) || PBKDF2_ITERATIONS;
+      const candidate = await derivePbkdf2(password, salt, iterations);
+      return timingSafeEqual(candidate, derived) ? user : null;
+    }
+
+    // Legacy unsalted SHA-256 record: verify, then transparently upgrade to
+    // PBKDF2 in place so the next login is salted. Never blocks old logins.
+    const legacy = await hashPasswordLegacy(password);
+    if (!timingSafeEqual(legacy, stored)) return null;
+    try {
+      const upgraded = { ...user, passwordHash: await hashPassword(password) };
+      await cacheOfflineCredentials(upgraded);
+      return upgraded;
+    } catch {
+      return user;
+    }
   } catch {
     return null;
   }

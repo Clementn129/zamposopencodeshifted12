@@ -48,9 +48,8 @@ const AuditLog = () => {
       .then(({ data }) => {
         if (cancelled) return;
         setLogs(((data ?? []) as unknown) as AuditEntry[]);
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
+        setLoading(false);
+      }, () => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [business?.id]);
 

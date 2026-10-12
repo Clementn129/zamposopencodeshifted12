@@ -88,8 +88,7 @@ const Pos = () => {
       .maybeSingle()
       .then(({ data }) => {
         if (data) setCashierName(data.display_name || data.username);
-      })
-      .catch(() => {});
+      }, () => {});
   }, [business?.id, role, user]);
 
   const { activeProducts, isLoading: productsLoading, isOnline, refetch: refetchProducts } = useProducts(business?.id);
@@ -317,6 +316,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     barcode: null,
     isActive: r.is_active,
     itemType: r.item_type === "service" ? "service" : "product",
+    isDish: false,
     trackStock: r.track_stock !== false,
     taxCategory: (r.tax_category as Product["taxCategory"]) ?? "taxable",
     imageUrl: null,
@@ -509,6 +509,19 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     // Snap to a whole unit. Guards against "2.5" reaching a column that can't hold it.
     const whole = Math.floor(value);
     if (whole === existing.quantity) return;
+    // Typing a quantity must obey the same stock ceiling as the "+" button —
+    // otherwise a cashier can type past the add-time check and oversell. Fail
+    // closed unless the business explicitly allows negative stock, and skip
+    // services / untracked (quick-added) lines.
+    const prod = activeProducts.find((x) => x.id === existing.productId);
+    if (
+      business?.preventNegativeStock !== false &&
+      prod && prod.itemType !== 'service' && prod.trackStock !== false &&
+      whole > (prod.stock ?? 0)
+    ) {
+      toast({ variant: "destructive", title: "No stock to sell", description: `${existing.name} has only ${prod.stock ?? 0} left.` });
+      return;
+    }
     const updated = { ...existing, quantity: whole };
     setCart(prev => prev.map((l) => (l.lineId === lineId ? updated : l)));
     await saveCartItem(updated);
@@ -608,6 +621,24 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
     if (trimmedCustomerTpin && !/^\d{10}$/.test(trimmedCustomerTpin)) {
       toast({ variant: "destructive", title: "Invalid TPIN", description: "Customer TPIN must be 10 digits." });
       return;
+    }
+
+    // Final stock check at checkout. The cart is persisted, so it can come back
+    // with quantities entered before a stock change, and a cached stock can drift
+    // offline. Fail closed unless the business explicitly allows negative stock;
+    // services and untracked (quick-added) lines are exempt. Quantities are
+    // aggregated per product because one product can occupy several cart lines.
+    if (business.preventNegativeStock !== false) {
+      const qtyByProduct = new Map<string, number>();
+      for (const l of cart) qtyByProduct.set(l.productId, (qtyByProduct.get(l.productId) || 0) + l.quantity);
+      for (const [productId, qty] of qtyByProduct) {
+        const p = activeProducts.find((x) => x.id === productId);
+        if (!p || p.itemType === 'service' || p.trackStock === false) continue;
+        if (qty > (p.stock ?? 0)) {
+          toast({ variant: "destructive", title: "No stock to sell", description: `${p.name} has only ${p.stock ?? 0} left — reduce the quantity or remove it.` });
+          return;
+        }
+      }
     }
 
     // Derive amount_paid from payment mode

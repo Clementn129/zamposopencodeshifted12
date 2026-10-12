@@ -463,6 +463,11 @@ const Reports = () => {
         return c + unitCost * (Number(it.quantity) || 0);
       }, 0);
     }, 0);
+    // Guard: when no line carries a cost price the profit figures assume zero
+    // cost, which overstates profit. Flag it so the UI can say so.
+    const hasCostData = active.some((s) =>
+      (Array.isArray(s.items) ? s.items : []).some((it: any) => (Number(it.costPrice ?? it.cost_price ?? it.cost ?? 0) || 0) > 0),
+    );
     const businessExp = expenses.filter((e) => e.category !== "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
     const drawings = expenses.filter((e) => e.category === "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
     // Tax collected is owed onward, not profit — exclude it from gross profit.
@@ -482,7 +487,7 @@ const Reports = () => {
       cur.revenue += Number(s.total || 0);
       byCashier[k] = cur;
     });
-    return { revenue, tax, cogs, grossProfit, netProfit, businessExp, drawings, outstanding, count: active.length, byPayment, byCashier };
+    return { revenue, tax, cogs, grossProfit, netProfit, businessExp, drawings, outstanding, count: active.length, byPayment, byCashier, hasCostData };
   }, [sales, expenses, debtors]);
 
   // CAPEX is deliberately absent from every figure above. It is shown as its
@@ -821,6 +826,13 @@ const Reports = () => {
                 <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Net Profit" value={formatZMW(stats.netProfit)} highlight />
                 <StatCard icon={<AlertCircle className="w-4 h-4" />} label="Outstanding Debts" value={formatZMW(stats.outstanding)} />
               </div>
+
+              {!stats.hasCostData && stats.count > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No cost prices recorded for these sales, so Gross/Net Profit assume zero cost and are overstated. Add
+                  cost prices to products for accurate profit.
+                </p>
+              )}
 
               {/* CAPEX: its own box, deliberately outside every figure above. */}
               {business?.capexEnabled && (

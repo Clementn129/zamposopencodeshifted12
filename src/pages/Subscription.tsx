@@ -48,8 +48,7 @@ const Subscription = () => {
       .select("id", { count: "exact", head: true })
       .eq("business_id", business.id)
       .eq("is_active", true)
-      .then(({ count }) => setActiveCashiers(count ?? 0))
-      .catch(() => {});
+      .then(({ count }) => setActiveCashiers(count ?? 0), () => {});
   }, [business?.id]);
 
   const tier = useMemo(

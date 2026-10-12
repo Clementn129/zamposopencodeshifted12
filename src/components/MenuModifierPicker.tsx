@@ -21,7 +21,7 @@ interface Props {
   open: boolean;
   product: { id: string; name: string; basePrice: number } | null;
   groups: ModifierGroup[];
-  modifiersByGroup: Record<string, Array<{ id: string; groupId: string; name: string; price_adjustment: number }>>;
+  modifiersByGroup: Record<string, Array<{ id: string; name: string; price_adjustment: number }>>;
   groupIdsByProduct: Record<string, string[]>;
   onClose: () => void;
   onConfirm: (modifiers: ModifierPick[], unitPrice: number) => void;

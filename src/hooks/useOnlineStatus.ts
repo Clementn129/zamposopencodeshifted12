@@ -17,7 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 // pulls useOnlineStatus consumes the same state instead of starting its own
 // timer (the app had 80+ consumers).
 
-const SUPABASE_URL = supabase.supabaseUrl;
+const SUPABASE_URL = (supabase as unknown as { supabaseUrl: string }).supabaseUrl;
 const PROBE_URL = `${SUPABASE_URL}/rest/v1/`;
 const PROBE_INTERVAL_MS = 10_000;
 const PROBE_TIMEOUT_MS = 6_000;

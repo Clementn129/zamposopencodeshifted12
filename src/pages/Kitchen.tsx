@@ -110,7 +110,7 @@ const Kitchen = () => {
     const current = order.status as KitchenStatus;
     const idx = STATUS_FLOW.indexOf(current);
     const next = STATUS_FLOW[idx + 1] as KitchenStatus;
-    await setStatus(order, next ?? order.status);
+    await setStatus(order, next ?? (order.status as KitchenStatus));
   };
 
   const setStatus = async (order: KitchenOrderRow, status: KitchenStatus) => {

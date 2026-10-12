@@ -156,6 +156,7 @@ const SalesHistory = () => {
         if (!salesError && salesData) {
           const mapped = salesData.map((s: any) => ({
             id: s.id,
+            businessId: business.id,
             items: s.items as SaleItem[],
             subtotal: Number(s.subtotal),
             total: Number(s.total),
@@ -475,7 +476,9 @@ const SalesHistory = () => {
     const cashFromDebtors = monthlyDebtorPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const totalCashReceived = cashFromSales + cashFromDebtors;
 
-    // Calculate profit from cost prices, accounting for discounts
+    // Calculate profit from cost prices using the shared discount-aware line
+    // math (saleMath). `lineRevenue` reconciles exactly with the stored
+    // `discount_amount` (Σ gross − net), so totals match the DB.
     let totalProfit = 0;
     let totalCost = 0;
     let hasCostData = false;
@@ -484,33 +487,25 @@ const SalesHistory = () => {
       const saleSubtotal = Number(sale.subtotal) || 0;
 
       (sale.items || []).forEach(item => {
-        const costPrice = Number(item.costPrice) || 0;
-        const sellingPrice = Number(item.price) || 0;
-        const qty = Number(item.quantity) || 0;
-        const itemTotal = sellingPrice * qty;
-
-        const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
-        const itemRevenue = itemTotal - itemDiscountShare;
-
-        const itemCost = costPrice * qty;
+        const itemCost = lineCost(item);
         totalCost += itemCost;
-        totalProfit += itemRevenue - itemCost;
-        if (costPrice > 0) hasCostData = true;
+        totalProfit += lineRevenue(item, saleSubtotal, saleDiscount) - itemCost;
+        if ((Number(item.costPrice) || 0) > 0) hasCostData = true;
       });
     });
 
     // Net Profit subtracts BOTH business expenses AND owner drawings — owner
     // drawings aren't a true expense in accounting terms, but they reduce
     // available business cash so business owners need to see them netted out.
-    const netProfit = hasCostData
-      ? totalProfit - totalOutflows
-      : totalRevenue - totalOutflows;
-    const netCashPosition = totalCashReceived - totalOutflows;
-
     const taxCollected = countableSales.reduce((s, x) => s + (Number(x.taxAmount) || 0), 0);
     const taxableSales = countableSales.reduce((s, x) => s + (Number(x.taxableAmount) || 0), 0);
     const zeroRatedSales = countableSales.reduce((s, x) => s + (Number(x.zeroRatedAmount) || 0), 0);
     const exemptSales = countableSales.reduce((s, x) => s + (Number(x.exemptAmount) || 0), 0);
+
+    // Tax collected is owed onward, not profit (matches Reports) — exclude it
+    // from the profit basis before subtracting outflows.
+    const netProfit = (hasCostData ? totalProfit : totalRevenue) - taxCollected - totalOutflows;
+    const netCashPosition = totalCashReceived - totalOutflows;
 
     return {
       totalRevenue,
@@ -549,7 +544,9 @@ const SalesHistory = () => {
       .reduce((sum, e) => sum + Number(e.amount || 0), 0);
     const totalOutflows = businessExpenses + ownerDrawings;
 
-    // Calculate profit from cost prices, accounting for discounts
+    // Calculate profit from cost prices using the shared discount-aware line
+    // math (saleMath). `lineRevenue` reconciles exactly with the stored
+    // `discount_amount` (Σ gross − net), so totals match the DB.
     let totalProfit = 0;
     let totalCost = 0;
     let hasCostData = false;
@@ -558,31 +555,22 @@ const SalesHistory = () => {
       const saleSubtotal = Number(sale.subtotal) || 0;
 
       (sale.items || []).forEach(item => {
-        const costPrice = Number(item.costPrice) || 0;
-        const sellingPrice = Number(item.price) || 0;
-        const qty = Number(item.quantity) || 0;
-        const itemTotal = sellingPrice * qty;
-
-        // Proportionally distribute discount across items
-        const itemDiscountShare = saleSubtotal > 0 ? (itemTotal / saleSubtotal) * saleDiscount : 0;
-        const itemRevenue = itemTotal - itemDiscountShare;
-
-        const itemCost = costPrice * qty;
+        const itemCost = lineCost(item);
         totalCost += itemCost;
-        totalProfit += itemRevenue - itemCost;
-        if (costPrice > 0) hasCostData = true;
+        totalProfit += lineRevenue(item, saleSubtotal, saleDiscount) - itemCost;
+        if ((Number(item.costPrice) || 0) > 0) hasCostData = true;
       });
     });
-
-    // Both business expenses and owner drawings reduce business cash
-    const netProfit = hasCostData
-      ? totalProfit - totalOutflows
-      : totalRevenue - totalOutflows;
 
     const taxCollected = countableSales.reduce((s, x) => s + (Number(x.taxAmount) || 0), 0);
     const taxableSales = countableSales.reduce((s, x) => s + (Number(x.taxableAmount) || 0), 0);
     const zeroRatedSales = countableSales.reduce((s, x) => s + (Number(x.zeroRatedAmount) || 0), 0);
     const exemptSales = countableSales.reduce((s, x) => s + (Number(x.exemptAmount) || 0), 0);
+
+    // Tax collected is owed onward, not profit (matches Reports) — exclude it
+    // from the profit basis. Revenue and profit figures are tax-inclusive, so
+    // the extracted tax is subtracted before outflows.
+    const netProfit = (hasCostData ? totalProfit : totalRevenue) - taxCollected - totalOutflows;
 
     return {
       totalRevenue, totalSales, cashSales, mobileSales, avgSale,

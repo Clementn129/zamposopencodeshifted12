@@ -161,8 +161,23 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
   }, [fetchCashiers]);
 
   const callFn = useCallback(async (action: string, payload: Record<string, unknown>) => {
+    // `functions.invoke` attaches the current Supabase access token. A stale or
+    // missing token makes the edge function reject the call as "Not authenticated".
+    // Refresh first so a merely-expired access token still succeeds, and send the
+    // token explicitly so we always pass the freshest one.
+    let session = (await supabase.auth.getSession()).data.session;
+    const expiresSoon = session?.expires_at ? session.expires_at * 1000 < Date.now() + 60_000 : true;
+    if (!session || expiresSoon) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed.session) session = refreshed.session;
+    }
+    if (!session) {
+      throw new Error('Your session has expired. Please sign out and sign in again.');
+    }
+
     const { data, error } = await supabase.functions.invoke('manage-cashier', {
       body: { ...payload, action, business_id: businessId },
+      headers: { Authorization: `Bearer ${session.access_token}` },
     });
     if (error) {
       // Supabase wraps non-2xx into FunctionsHttpError; try to surface the JSON error
@@ -173,6 +188,9 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
         if (j?.message) msg = j.message;
         else if (j?.error) msg = j.error;
       } catch { /* ignore */ }
+      if (/not authenticated/i.test(msg)) {
+        msg = 'Your session has expired. Please sign out and sign in again.';
+      }
       throw new Error(msg);
     }
     return data;

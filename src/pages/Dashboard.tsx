@@ -48,8 +48,7 @@ const Dashboard = () => {
       .eq('business_id', business.id)
       .gte('created_at', from)
       .lte('created_at', to)
-      .then(({ count }) => setHasSalesToday((count ?? 0) > 0))
-      .catch(() => {});
+      .then(({ count }) => setHasSalesToday((count ?? 0) > 0), () => {});
   }, [business?.id]);
 
   useEffect(() => {
@@ -78,8 +77,7 @@ const Dashboard = () => {
       .limit(20)
       .then(({ data }) => {
         if (data) setExpiringProducts(data.map((r: any) => ({ name: r.name, expiryDate: r.expiry_date })));
-      })
-      .catch(() => {});
+      }, () => {});
   }, [business?.id, isService]);
 
   useEffect(() => {

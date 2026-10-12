@@ -204,7 +204,7 @@ export const useMenuModifiers = (businessId?: string, enabled = true): UseMenuMo
       const toAdd = [...desired].filter((gid) => !current.has(gid));
       const toRemove = [...current].filter((gid) => !desired.has(gid));
 
-      const ops: Promise<unknown>[] = [];
+      const ops: PromiseLike<unknown>[] = [];
       if (toAdd.length > 0) {
         ops.push(
           supabase.from("menu_item_modifiers").insert(toAdd.map((gid) => ({ product_id: productId, modifier_group_id: gid, business_id: businessId })))

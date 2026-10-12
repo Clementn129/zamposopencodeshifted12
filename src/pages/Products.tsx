@@ -306,26 +306,27 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     }
     let cancelled = false;
     setLoadingRecipe(true);
-    supabase
-      .from("recipe_ingredients")
-      .select("ingredient_id, quantity")
-      .eq("business_id", business.id)
-      .eq("product_id", editing.id)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.warn("recipe load error", error.message);
-          setRecipeLines([]);
-          setRecipeLoadFailed(true);
-          return;
-        }
-        setRecipeLines(
-          (data ?? []).map((r) => ({ ingredientId: r.ingredient_id, quantity: Number(r.quantity) || 0 })),
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingRecipe(false);
-      });
+    Promise.resolve(
+      supabase
+        .from("recipe_ingredients")
+        .select("ingredient_id, quantity")
+        .eq("business_id", business.id)
+        .eq("product_id", editing.id)
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.warn("recipe load error", error.message);
+            setRecipeLines([]);
+            setRecipeLoadFailed(true);
+            return;
+          }
+          setRecipeLines(
+            (data ?? []).map((r) => ({ ingredientId: r.ingredient_id, quantity: Number(r.quantity) || 0 })),
+          );
+        })
+    ).finally(() => {
+      if (!cancelled) setLoadingRecipe(false);
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing?.id, editing?.isDish, business?.id, isOnline]);

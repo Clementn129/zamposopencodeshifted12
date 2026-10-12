@@ -15,7 +15,7 @@ export function useDownstreamSync(businessId: string | undefined) {
   const expLastSyncAt = useCallback(() => {
     if (!businessId) return;
     const now = new Date().toISOString();
-    supabase.from("businesses").update({ last_sync_at: now }).eq("id", businessId).then(() => {}).catch(() => {});
+    supabase.from("businesses").update({ last_sync_at: now }).eq("id", businessId).then(() => {}, () => {});
   }, [businessId]);
 
   const pull = useCallback(async () => {

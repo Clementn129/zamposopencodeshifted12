@@ -16,7 +16,12 @@ interface BusinessDetails {
   phone?: string | null;
   email?: string | null;
   address?: string | null;
+  logoUrl?: string | null;
   tpin?: string | null;
+  taxMode?: string | null;
+  vatRate?: number | null;
+  customTaxName?: string | null;
+  customTaxRate?: number | null;
 }
 
 interface CashierMySalesProps {

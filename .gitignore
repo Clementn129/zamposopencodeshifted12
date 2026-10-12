@@ -33,6 +33,8 @@ cloudflare desktop app and android app rebuild/
 
 # Generated files
 supabase/migrations_all.sql
+supabase/.temp/
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*

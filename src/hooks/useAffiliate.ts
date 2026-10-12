@@ -171,7 +171,13 @@ export const useAffiliate = (userId?: string) => {
     if (!userId || !affiliate) return { error: new Error('Affiliate not found') };
 
     try {
-      const payload: Record<string, string | null> = {};
+      const payload: {
+        full_name?: string | null;
+        phone?: string | null;
+        payout_method?: string | null;
+        payout_number?: string | null;
+        payout_name?: string | null;
+      } = {};
       if (updates.full_name !== undefined) payload.full_name = updates.full_name?.trim() || null;
       if (updates.phone !== undefined) payload.phone = updates.phone?.trim() || null;
       if (updates.payout_method !== undefined) payload.payout_method = updates.payout_method || null;

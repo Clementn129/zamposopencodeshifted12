@@ -22,6 +22,7 @@ import { useProducts } from '@/hooks/useProducts';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { cacheDebtors, getCachedDebtors, updateCachedDebtor, generateOfflineId, updateCachedProductStock, queuePendingOp, saveOfflineSale, markSaleAsSynced } from '@/lib/offlineStorage';
+import { calculateTax, TaxCategory } from '@/lib/tax';
 
 type Debtor = {
   id: string;
@@ -148,6 +149,7 @@ const Debtors = () => {
           status: d.status,
           notes: d.notes,
           createdAt: d.createdAt,
+          dueDate: null,
         })));
       } else {
         // Use cached data when offline
@@ -257,6 +259,12 @@ const Debtors = () => {
       if (!line) return prev;
       const nextQty = line.quantity + delta;
       if (nextQty <= 0) return prev.filter(l => l.productId !== productId);
+      // Don't let "+" push a tracked line past available stock when the business
+      // prevents negative stock (mirrors the addToCart guard above).
+      const p = activeProducts.find(x => x.id === productId);
+      if (business?.preventNegativeStock !== false && p && p.itemType !== 'service' && p.trackStock !== false && nextQty > (p.stock ?? 0)) {
+        return prev;
+      }
       return prev.map(l => l.productId === productId ? { ...l, quantity: nextQty } : l);
     });
   };
@@ -268,6 +276,25 @@ const Debtors = () => {
   const creditCartTotal = useMemo(() =>
     creditCart.reduce((s, l) => s + l.price * l.quantity, 0),
   [creditCart]);
+
+  // Tax is extracted from the (tax-inclusive) cart total so credit sales record
+  // the same tax breakdown as POS sales. The customer still owes the inclusive
+  // total — this only fills the reporting fields.
+  const creditTaxBreakdown = useMemo(() => {
+    if (!business) return null;
+    return calculateTax(
+      {
+        taxMode: business.taxMode,
+        vatRate: business.vatRate,
+        customTaxName: business.customTaxName,
+        customTaxRate: business.customTaxRate,
+      },
+      creditCart.map((l) => ({
+        lineAmount: l.price * l.quantity,
+        taxCategory: (activeProducts.find((p) => p.id === l.productId)?.taxCategory || 'taxable') as TaxCategory,
+      })),
+    );
+  }, [creditCart, business, activeProducts]);
 
   const filteredProductsForAdd = useMemo(() => {
     if (!productSearch.trim()) return activeProducts;
@@ -288,6 +315,22 @@ const Debtors = () => {
       return;
     }
 
+    // Re-check stock at save time. The cart can outlive a stock change, so fail
+    // closed unless the business explicitly allows negative stock; services and
+    // untracked (quick-added) lines are exempt. One line per product here.
+    if (business?.preventNegativeStock !== false) {
+      const over = creditCart.find(l => {
+        const p = activeProducts.find(x => x.id === l.productId);
+        if (!p || p.itemType === 'service' || p.trackStock === false) return false;
+        return l.quantity > (p.stock ?? 0);
+      });
+      if (over) {
+        const p = activeProducts.find(x => x.id === over.productId);
+        toast({ variant: 'destructive', title: 'No stock to sell', description: `${over.name} has only ${p?.stock ?? 0} left.` });
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       // Back-dating (opt-in): a past date is combined with the current time.
@@ -305,9 +348,10 @@ const Debtors = () => {
         discountType: null,
         discountValue: 0,
         notes: null,
-        taxCategory: 'taxable' as const,
+        taxCategory: (activeProducts.find(x => x.id === l.productId)?.taxCategory || 'taxable') as TaxCategory,
       }));
       const total = creditCartTotal;
+      const tax = creditTaxBreakdown;
 
       // OFFLINE-FIRST: persist the sale locally before touching the network so
       // a flaky connection can never lose it. synced:false keeps it retryable.
@@ -322,10 +366,10 @@ const Debtors = () => {
         paymentMethod: 'credit',
         createdAt: now,
         synced: false,
-        taxAmount: 0,
-        taxableAmount: 0,
-        zeroRatedAmount: 0,
-        exemptAmount: 0,
+        taxAmount: tax?.taxAmount || 0,
+        taxableAmount: tax?.taxableAmount || 0,
+        zeroRatedAmount: tax?.zeroRatedAmount || 0,
+        exemptAmount: tax?.exemptAmount || 0,
         customerName: customerName.trim() || null,
         customerTpin: null,
         customerPhone: customerPhone.trim() || null,
@@ -359,10 +403,10 @@ const Debtors = () => {
             p_discount_type: null,
             p_payment_method: 'credit',
             p_created_at: now,
-            p_tax_amount: 0,
-            p_taxable_amount: 0,
-            p_zero_rated_amount: 0,
-            p_exempt_amount: 0,
+            p_tax_amount: tax?.taxAmount || 0,
+            p_taxable_amount: tax?.taxableAmount || 0,
+            p_zero_rated_amount: tax?.zeroRatedAmount || 0,
+            p_exempt_amount: tax?.exemptAmount || 0,
             p_customer_name: customerName.trim(),
             p_customer_tpin: null,
             p_amount_paid: 0,
@@ -419,6 +463,7 @@ const Debtors = () => {
           status: 'unpaid',
           notes: notes.trim() || null,
           createdAt: now,
+          dueDate: null,
         }]);
 
         await queuePendingOp({

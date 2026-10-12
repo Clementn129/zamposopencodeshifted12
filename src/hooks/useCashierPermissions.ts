@@ -52,8 +52,7 @@ export const useCashierPermissions = () => {
           return;
         }
         setCanAdjustStock(data?.can_adjust_stock === true);
-      })
-      .catch(() => {
+      }, () => {
         if (!cancelled) setCanAdjustStock(false);
       });
 

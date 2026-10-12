@@ -77,7 +77,7 @@ export function useSalesSync(businessId: string | undefined) {
 
       // Stamp last_sync_at if any sale was synced
       if (anySynced && businessId) {
-        supabase.from('businesses').update({ last_sync_at: new Date().toISOString() }).eq('id', businessId).then(() => {}).catch(() => {});
+        supabase.from('businesses').update({ last_sync_at: new Date().toISOString() }).eq('id', businessId).then(() => {}, () => {});
       }
     } catch (e: any) {
       console.error("Error in sync process:", e);
