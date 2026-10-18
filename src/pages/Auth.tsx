@@ -76,11 +76,19 @@ const Auth = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
 
+  // A recovery link lands on `/auth?reset=true` and/or a URL hash carrying
+  // `type=recovery`. Read these synchronously so the redirect guard below can
+  // never fire before the reset form has a chance to render — the
+  // PASSWORD_RECOVERY event is racy and can be missed (see RESET_INTENT_KEY).
+  const urlReset = searchParams.get('reset') === 'true';
+  const hashReset = typeof window !== 'undefined' && window.location.hash.includes('type=recovery');
+  const isResettingNow = urlReset || hashReset;
+
   // Latch the reset intent: URL flag, the recovery event, or a previously
   // persisted intent for this tab. Only ever turns on (cleared on success).
   useEffect(() => {
     if (resetSuccess) return;
-    let wanted = searchParams.get('reset') === 'true' || isPasswordRecovery;
+    let wanted = isResettingNow || isPasswordRecovery;
     if (!wanted) {
       try {
         wanted = sessionStorage.getItem(RESET_INTENT_KEY) === '1';
@@ -95,7 +103,7 @@ const Auth = () => {
     } catch {
       // non-critical
     }
-  }, [searchParams, isPasswordRecovery, resetSuccess]);
+  }, [isResettingNow, isPasswordRecovery, resetSuccess]);
 
   // Tick the forgot-password cooldown down to zero.
   useEffect(() => {
@@ -166,13 +174,15 @@ const Auth = () => {
 
   const dailyLimitReached = resendCount >= RESEND_DAILY_LIMIT;
 
-  // Redirect if already logged in (but NOT during password recovery)
+  // Redirect if already logged in (but NOT while a password reset is in
+  // progress — otherwise a recovery link silently signs the user in instead of
+  // letting them set a new password).
   useEffect(() => {
-    if (!user || role === 'unknown' || isPasswordRecovery) return;
+    if (!user || role === 'unknown' || isPasswordRecovery || isResettingNow || resetIntent) return;
     if (role === 'cashier') navigate('/pos');
     else if (role === 'kitchen_staff' || role === 'manager') navigate('/kitchen');
     else navigate('/dashboard');
-  }, [user, role, navigate, isPasswordRecovery]);
+  }, [user, role, navigate, isPasswordRecovery, isResettingNow, resetIntent]);
 
   // Cashier-tab login completes before the backend role resolves, so we hold a
   // "pending" flag and navigate once the real role is known — kitchen staff and
