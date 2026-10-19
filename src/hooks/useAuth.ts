@@ -359,8 +359,29 @@ export const useAuth = () => {
         clearOfflineSession();
         applySession(data.session);
         if (data.session?.user) {
+          const userId = data.session.user.id;
+          // Cache credentials IMMEDIATELY on a successful online sign-in —
+          // before any network-dependent role resolution — so a weak or flaky
+          // connection can never stop the user being able to log in offline
+          // later. The stored role is refined once get_my_role resolves below.
+          void (async () => {
+            try {
+              const { cacheOfflineCredentials, hashPassword } = await import('@/lib/offlineStorage');
+              const passwordHash = await hashPassword(password);
+              await cacheOfflineCredentials({
+                email,
+                passwordHash,
+                userId,
+                role: readCachedRole(userId) ?? 'unknown',
+                lastOnlineLogin: new Date().toISOString(),
+              });
+            } catch (e) {
+              console.warn('Failed to cache credentials for offline use:', e);
+            }
+          })();
+
           setTimeout(async () => {
-            const { role, isSuperAdmin } = await resolveRole(data.session.user.id);
+            const { role, isSuperAdmin } = await resolveRole(userId);
             setAuthState(prev => ({ ...prev, role, isSuperAdmin }));
             try {
               const { cacheOfflineCredentials, hashPassword } = await import('@/lib/offlineStorage');

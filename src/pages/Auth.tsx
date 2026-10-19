@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Store, Mail, Lock, User, Building2, Loader2, Phone, MapPin, ArrowLeft, Eye, EyeOff, Gift, Wallet, Briefcase } from 'lucide-react';
 import { validateAffiliateCode } from '@/hooks/useAffiliate';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 // Supabase auth errors don't always carry a plain string on `.message` — the
 // client can surface an object (or nothing at all) when the request fails below
@@ -49,11 +50,24 @@ function isEmailRateLimit(error: unknown): boolean {
 // so the intent is persisted for the tab and re-read on mount.
 const RESET_INTENT_KEY = 'zampos:password-reset-intent';
 
+// An online login round-trip that never resolves (weak/slow connection) must
+// not trap the user on the sign-in screen. Bound the attempt and fall back to
+// cached credentials when it exceeds this budget.
+const ONLINE_ATTEMPT_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('login-attempt-timeout')), ms)),
+  ]);
+}
+
 const Auth = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { signIn, signInOffline, signInOfflineCashier, signUp, signOut, user, role, isPasswordRecovery, clearPasswordRecovery } = useAuthContext();
   const { toast } = useToast();
+  const { isOnline } = useOnlineStatus();
   const [isLoading, setIsLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   // Set while a reset link is the reason the user is here and they haven't
@@ -210,11 +224,30 @@ const Auth = () => {
     setIsLoading(true);
 
     try {
-      const { error } = await signIn(loginEmail, loginPassword);
-      
-      if (error) {
-        const msg = String(error.message || '').toLowerCase();
-        const isNetworkError = /fetch|network|timeout|offline|failed to connect/i.test(msg);
+      // Known-offline: verify cached credentials first so a poor/flaky
+      // connection doesn't hang on a doomed network round-trip. If the cache
+      // misses, fall through to the online path — the probe may be stale and
+      // the network may have come back.
+      if (!isOnline) {
+        const { error: offlineMsg } = await signInOffline(loginEmail, loginPassword);
+        if (!offlineMsg) {
+          toast({
+            title: 'Offline Mode',
+            description: 'Signed in with cached credentials.',
+          });
+          return;
+        }
+      }
+
+      // Bounded online attempt: a weak/slow connection must not hang the login
+      // screen, so time it out and fall back to cached credentials quickly.
+      const attempt = await withTimeout(signIn(loginEmail, loginPassword), ONLINE_ATTEMPT_TIMEOUT_MS).catch(() => null);
+      const error = attempt?.error ?? null;
+      const timedOut = attempt === null;
+
+      if (timedOut || error) {
+        const msg = String(error?.message || '').toLowerCase();
+        const isNetworkError = timedOut || /fetch|network|timeout|offline|failed to connect/i.test(msg);
         
         if (isNetworkError) {
           const { error: offlineError } = await signInOffline(loginEmail, loginPassword);
@@ -222,7 +255,7 @@ const Auth = () => {
             toast({
               variant: 'destructive',
               title: 'Offline Login Failed',
-              description: 'No internet and no cached credentials available.',
+              description: 'No saved credentials on this device. Log in once with internet, then you can log in offline.',
             });
           } else {
             toast({
@@ -325,14 +358,31 @@ const Auth = () => {
     }
     setIsLoading(true);
     try {
-      const { data, error: fnErr } = await supabase.functions.invoke('manage-cashier', {
-        body: {
-          action: 'cashier_login',
-          code: cashierCode.trim().toUpperCase(),
-          username: cashierUsername.trim().toLowerCase(),
-          pin: cashierPin,
-        },
-      });
+      // Known-offline: check the cached cashier lookup first instead of waiting
+      // for the edge-function call to time out. Falls through to the online
+      // path below if there is no cached lookup (probe may be stale).
+      if (!isOnline) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+      }
+
+      const invokeResult = await withTimeout(
+        supabase.functions.invoke('manage-cashier', {
+          body: {
+            action: 'cashier_login',
+            code: cashierCode.trim().toUpperCase(),
+            username: cashierUsername.trim().toLowerCase(),
+            pin: cashierPin,
+          },
+        }),
+        ONLINE_ATTEMPT_TIMEOUT_MS,
+      ).catch(() => null);
+      if (!invokeResult) throw new Error('network timeout');
+      const { data, error: fnErr } = invokeResult;
       if (fnErr) throw new Error(fnErr.message || 'Login failed');
       const { email, password } = (data ?? {}) as { email?: string; password?: string };
       if (!email || !password) throw new Error('Invalid response from server');
