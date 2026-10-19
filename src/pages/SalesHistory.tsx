@@ -946,8 +946,8 @@ const SalesHistory = () => {
 
       <div className="min-h-screen bg-background safe-area-inset">
         <header className="bg-card border-b border-border px-4 py-4">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-3 min-w-0">
               <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} aria-label="Back">
                 <ArrowLeft className="h-5 w-5" />
               </Button>

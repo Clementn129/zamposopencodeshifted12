@@ -771,12 +771,12 @@ const Reports = () => {
 
         <main className="p-4 max-w-4xl mx-auto space-y-4">
           <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock" | "tickets" | "items" | "ingredients")}>
-            <TabsList className={`grid w-full ${isRestaurant ? "grid-cols-5" : "grid-cols-3"}`}>
-              <TabsTrigger value="sales">Sales & Profit</TabsTrigger>
-              <TabsTrigger value="stock">Stock</TabsTrigger>
-              {isRestaurant && <TabsTrigger value="tickets">Tickets</TabsTrigger>}
-              <TabsTrigger value="items">Item History</TabsTrigger>
-              {isRestaurant && <TabsTrigger value="ingredients">Ingredients</TabsTrigger>}
+            <TabsList className={`flex w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:justify-center md:overflow-visible md:grid ${isRestaurant ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
+              <TabsTrigger value="sales" className="shrink-0">Sales & Profit</TabsTrigger>
+              <TabsTrigger value="stock" className="shrink-0">Stock</TabsTrigger>
+              {isRestaurant && <TabsTrigger value="tickets" className="shrink-0">Tickets</TabsTrigger>}
+              <TabsTrigger value="items" className="shrink-0">Item History</TabsTrigger>
+              {isRestaurant && <TabsTrigger value="ingredients" className="shrink-0">Ingredients</TabsTrigger>}
             </TabsList>
           </Tabs>
 

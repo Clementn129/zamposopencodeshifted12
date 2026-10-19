@@ -401,7 +401,7 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
             {cashiers.map(c => (
-              <li key={c.id} className="p-3 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+              <li key={c.id} className="p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{c.display_name || c.username}</p>
                   <p className="text-xs text-muted-foreground">
@@ -411,7 +411,7 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                     {ROLE_LABEL[c.role] ?? 'Cashier'}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex flex-wrap items-center gap-1 sm:justify-end sm:shrink-0">
                   {stockAccessAvailable && (
                     <div className="flex items-center gap-2 mr-2">
                       <Switch
@@ -440,14 +440,14 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                       </Label>
                     </div>
                   )}
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setResetTarget(c); setResetPin(''); }}>
-                    <KeyRound className="h-4 w-4 mr-1" /> Reset PIN
+                  <Button variant="ghost" size="sm" disabled={busy} aria-label={`Reset PIN for ${c.username}`} onClick={() => { setResetTarget(c); setResetPin(''); }}>
+                    <KeyRound className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Reset PIN</span>
                   </Button>
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => handleToggleActive(c)}>
-                    <Power className="h-4 w-4 mr-1" /> {c.is_active ? 'Disable' : 'Enable'}
+                  <Button variant="ghost" size="sm" disabled={busy} aria-label={c.is_active ? `Disable ${c.username}` : `Enable ${c.username}`} onClick={() => handleToggleActive(c)}>
+                    <Power className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">{c.is_active ? 'Disable' : 'Enable'}</span>
                   </Button>
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => handleDelete(c)}>
-                    <Trash2 className="h-4 w-4 mr-1 text-destructive" />
+                  <Button variant="ghost" size="sm" disabled={busy} aria-label={`Delete ${c.username}`} onClick={() => handleDelete(c)}>
+                    <Trash2 className="h-4 w-4 text-destructive sm:mr-1" />
                   </Button>
                 </div>
               </li>
@@ -455,9 +455,25 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
           </ul>
         )}
 
-        <Button variant="pos" className="w-full" onClick={() => setCreateOpen(true)} disabled={busy || atCap}>
+        <Button
+          variant="pos"
+          className="w-full"
+          onClick={() => {
+            if (atCap) {
+              toast({ variant: 'destructive', title: 'Cashier limit reached', description: `Your plan allows a maximum of ${cashierCap} active cashier${cashierCap === 1 ? '' : 's'}. Contact admin to upgrade.` });
+              return;
+            }
+            setCreateOpen(true);
+          }}
+          disabled={busy}
+        >
           <Plus className="h-4 w-4 mr-1" /> Add Cashier
         </Button>
+        {atCap && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+            {activeCount} active cashier{activeCount === 1 ? '' : 's'} used — your plan allows {cashierCap}. Contact admin to upgrade.
+          </p>
+        )}
       </CardContent>
 
 

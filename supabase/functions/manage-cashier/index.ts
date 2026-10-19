@@ -76,6 +76,26 @@ function loginRateLimited(key: string): boolean {
 // CAPEX + cashier-stock-access migration has not been applied.
 const MISSING_COLUMN_RE = /column .* does not exist|PGRST204|42703/i;
 
+// Auth admin returns one of these when the internal login already exists.
+const ALREADY_REGISTERED_RE = /already been registered|already registered|already exists|duplicate/i;
+
+// Look up an auth user by email. Internal cashier logins are few, so scanning
+// the paginated user list is cheap and avoids needing an admin SQL endpoint.
+// deno-lint-ignore no-explicit-any
+async function findAuthUserByEmail(admin: any, email: string) {
+  const wanted = email.toLowerCase();
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data?.users) return null;
+    const hit = data.users.find(
+      (u: { email?: string | null }) => (u.email ?? "").toLowerCase() === wanted,
+    );
+    if (hit) return hit;
+    if (data.users.length < 200) break;
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -193,25 +213,52 @@ Deno.serve(async (req) => {
       const email = internalEmail(biz.id, username);
       const password = pinPassword(pin);
 
+      const metadata = { cashier: true, business_id: biz.id, username, display_name: displayName };
+      let cashierUserId: string | null = null;
+
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
-        user_metadata: { cashier: true, business_id: biz.id, username, display_name: displayName },
+        user_metadata: metadata,
       });
-      if (createErr || !created.user) {
+      if (created?.user) {
+        cashierUserId = created.user.id;
+      } else if (ALREADY_REGISTERED_RE.test(createErr?.message ?? "")) {
+        // The internal login already exists. That is the signature of an orphan:
+        // an earlier attempt provisioned the auth user but never completed the
+        // business_cashiers row. Adopting that free login (instead of failing
+        // forever with a confusing "already registered") makes create idempotent.
+        const existing = await findAuthUserByEmail(admin, email);
+        if (!existing) {
+          return json({ error: "That username's login already exists. Try a different username." }, 409);
+        }
+        const { count } = await admin
+          .from("business_cashiers")
+          .select("id", { count: "exact", head: true })
+          .eq("auth_user_id", existing.id);
+        if ((count ?? 0) > 0) return json({ error: "That username is already in use" }, 409);
+        // Reset the PIN and metadata so the owner's chosen credentials apply.
+        const { error: adoptErr } = await admin.auth.admin.updateUserById(existing.id, {
+          password,
+          user_metadata: metadata,
+        });
+        if (adoptErr) return json({ error: adoptErr.message }, 500);
+        cashierUserId = existing.id;
+      } else {
         return json({ error: createErr?.message || "Failed to create cashier auth user" }, 500);
       }
 
       // Cleanup helper if subsequent inserts fail
       const cleanup = async () => {
-        try { await admin.auth.admin.deleteUser(created.user!.id); } catch { /* ignore */ }
+        if (!cashierUserId) return;
+        try { await admin.auth.admin.deleteUser(cashierUserId); } catch { /* ignore */ }
       };
 
       // Insert business_cashiers row (cap trigger enforces hard limit too)
       const rowInsert: Record<string, unknown> = {
         business_id: biz.id,
-        auth_user_id: created.user.id,
+        auth_user_id: cashierUserId,
         username,
         display_name: displayName,
         is_active: true,
@@ -257,10 +304,10 @@ Deno.serve(async (req) => {
 
       // Assign cashier role (handle_new_user trigger created a business_owner role
       // by default — remove it and assign cashier instead).
-      await admin.from("user_roles").delete().eq("user_id", created.user.id);
+      await admin.from("user_roles").delete().eq("user_id", cashierUserId);
       const { error: roleErr } = await admin
         .from("user_roles")
-        .insert({ user_id: created.user.id, role: "cashier" });
+        .insert({ user_id: cashierUserId, role: "cashier" });
       if (roleErr) {
         await admin.from("business_cashiers").delete().eq("id", row.id);
         await cleanup();
@@ -276,9 +323,9 @@ Deno.serve(async (req) => {
       const { error: bizDelErr } = await admin
         .from("businesses")
         .delete()
-        .eq("user_id", created.user.id);
+        .eq("user_id", cashierUserId);
       if (bizDelErr) {
-        await admin.from("user_roles").delete().eq("user_id", created.user.id);
+        await admin.from("user_roles").delete().eq("user_id", cashierUserId);
         await admin.from("business_cashiers").delete().eq("id", row.id);
         await cleanup();
         return json({ error: "Failed to finalize cashier account" }, 500);

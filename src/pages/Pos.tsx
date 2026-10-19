@@ -1183,7 +1183,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       )}
       <div className="min-h-screen bg-background safe-area-inset">
         <header className="bg-card border-b border-border px-4 py-4">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="icon" onClick={() => navigate(role === 'cashier' ? '/auth' : role === 'kitchen_staff' || role === 'manager' ? '/kitchen' : '/dashboard')} aria-label="Back"><ArrowLeft className="h-5 w-5" /></Button>
               <div>
@@ -1194,7 +1194,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               {isRestaurant && (role === 'kitchen_staff' || role === 'manager') && (
                 <Button variant="outline" size="sm" onClick={() => navigate('/kitchen')}>
                   <ChefHat className="h-4 w-4 mr-1" /> Kitchen
