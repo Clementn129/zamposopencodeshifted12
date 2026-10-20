@@ -84,14 +84,34 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
     { headers: { Authorization: `Bearer ${LENCO_SECRET_KEY}` } },
   );
   const body = await res.json().catch(() => null);
-  if (!res.ok || !body?.status) {
-    throw new Error(body?.message || `Lenco verification failed (HTTP ${res.status})`);
+  const apiMessage = String(body?.message ?? "");
+
+  // Lenco answers an unknown reference with a non-2xx (usually 404) and a
+  // "Collection details was not found" message. A just-created collection can
+  // 404 for a few seconds while the widget's reference propagates, so treat it
+  // as in-flight rather than a hard failure — the client re-polls.
+  const notFoundYet = res.status === 404 || /not found|could not be found|does not exist/i.test(apiMessage);
+  if (notFoundYet) {
+    throw new Error("Payment is still pending confirmation — your subscription will update automatically once it clears. Please don't pay again.");
+  }
+
+  // Any other hard HTTP failure (401/403 = bad secret, 5xx = Lenco down).
+  if (!res.ok) {
+    throw new Error(apiMessage || `Lenco verification failed (HTTP ${res.status})`);
+  }
+
+  // Lenco can also reply 200 with { status: false, message } for API problems.
+  if (!body?.status || !body?.data) {
+    throw new Error(apiMessage || "Lenco verification failed");
   }
 
   const payment = body.data;
   const paidStatus = String(payment?.status ?? "").toLowerCase();
   if (paidStatus !== "successful") {
-    if (paidStatus === "pending" || paidStatus === "pay-offline" || paidStatus === "processing") {
+    // Everything that isn't a definitive failure is still in flight
+    // (mobile-money authorisation, OTP, 3-D Secure, or plain pending).
+    const inFlight = ["pending", "pay-offline", "processing", "otp-required", "3ds-auth-required"];
+    if (inFlight.includes(paidStatus)) {
       throw new Error("Payment is still pending confirmation — your subscription will update automatically once it clears. Please don't pay again.");
     }
     throw new Error(`Payment not completed (status: ${payment?.status || "unknown"})`);

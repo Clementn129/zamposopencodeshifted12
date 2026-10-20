@@ -8,6 +8,11 @@ const WIDGET_SRC =
 const PUBLIC_KEY =
   import.meta.env.VITE_LENCO_PUBLIC_KEY || "pub-8f9faf30d5dec329d1212b9cda882b0328cb9dcc6fc96685";
 
+// How long to wait for the widget to report an outcome before giving up. Long
+// enough for a card 3-D Secure redirect and a mobile-money approval, short
+// enough that the button never appears frozen.
+const WIDGET_CALLBACK_TIMEOUT_MS = 120_000;
+
 type LencoWindow = Window & {
   LencoPay?: {
     getPaid: (opts: Record<string, unknown>) => void;
@@ -70,6 +75,24 @@ export const lenco = {
     if (!w.LencoPay) throw new Error("Lenco payment window is unavailable");
 
     return new Promise<CheckoutResult>((resolve, reject) => {
+      // Guard against a widget that never fires any callback (script
+      // half-loaded, blocked popup, user leaves it open). Without this the
+      // caller's `await` would hang forever and the button would spin on
+      // "Processing..." with no way out. The reference is already persisted by
+      // the caller, so a late/abandoned payment is still reconciled later.
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Payment window did not respond — if you completed the payment it will be applied automatically."));
+      }, WIDGET_CALLBACK_TIMEOUT_MS);
+      const done = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
+
       w.LencoPay!.getPaid({
         key: PUBLIC_KEY,
         reference: opts.reference,
@@ -80,9 +103,11 @@ export const lenco = {
         label: "Sale Point subscription renewal",
         ...(opts.firstName ? { customer: { firstName: opts.firstName, lastName: opts.lastName ?? "", phone: opts.phone } } : {}),
         onSuccess: (res: { reference?: string }) =>
-          resolve({ reference: res?.reference || opts.reference }),
-        onConfirmationPending: () => resolve({ reference: opts.reference, pending: true }),
-        onClose: () => reject(new Error("Payment window was closed before completion")),
+          done(() => resolve({ reference: res?.reference || opts.reference })),
+        onConfirmationPending: () =>
+          done(() => resolve({ reference: opts.reference, pending: true })),
+        onClose: () =>
+          done(() => reject(new Error("Payment window was closed before completion"))),
       });
     });
   },

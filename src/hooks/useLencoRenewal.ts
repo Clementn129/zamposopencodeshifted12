@@ -108,16 +108,20 @@ const verifyRenewal = async (
 /**
  * Retries "pending" outcomes with growing backoff (3s / 6s / 10s / 15s) so a
  * typical mobile-money confirmation settles without the user doing anything.
- * Non-pending outcomes are returned immediately.
+ * Non-pending outcomes are returned immediately. `onPending` fires once, as
+ * soon as the first pending result arrives, so the UI can tell the user what is
+ * happening instead of leaving them staring at a spinner for ~34 seconds.
  */
 const verifyWithRetry = async (
   reference: string,
   businessId: string,
   months: number,
   attempts = 5,
+  onPending?: () => void,
 ): Promise<VerifyResult> => {
   const backoff = [3000, 6000, 10000, 15000];
   let result = await verifyRenewal(reference, businessId, months);
+  if (result.status === "pending") onPending?.();
   for (let attempt = 1; attempt < attempts && result.status === "pending"; attempt++) {
     await sleep(backoff[attempt - 1] ?? 15000);
     result = await verifyRenewal(reference, businessId, months);
@@ -196,7 +200,14 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
 
       await lenco.openCheckout({ reference, amount: onlineTotalZmw, email });
 
-      const result = await verifyWithRetry(reference, businessId, months);
+      const result = await verifyWithRetry(reference, businessId, months, 5, () => {
+        // Tell the user immediately (usually mobile-money awaiting approval on
+        // their phone) instead of spinning silently through the retry loop.
+        toast({
+          title: "Confirming payment",
+          description: "Waiting for your payment to confirm — approve it on your phone if prompted. Your subscription will update automatically; please don't pay again.",
+        });
+      });
 
       if (result.status === "success") {
         clearPending();
