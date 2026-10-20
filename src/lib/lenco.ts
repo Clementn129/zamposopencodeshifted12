@@ -6,7 +6,7 @@
 const WIDGET_SRC =
   import.meta.env.VITE_LENCO_WIDGET_URL || "https://pay.lenco.co/js/v1/inline.js";
 const PUBLIC_KEY =
-  import.meta.env.VITE_LENCO_PUBLIC_KEY || "pub-8f9faf30d5dec329d1212b9cda882b0328cb9dcc6fc96685";
+  import.meta.env.VITE_LENCO_PUBLIC_KEY || "pub-46fcaf3d90645a99815a9305ac0c3fcfc78e755e164d087d";
 
 // How long to wait for the widget to report an outcome before giving up. Long
 // enough for a card 3-D Secure redirect and a mobile-money approval, short
