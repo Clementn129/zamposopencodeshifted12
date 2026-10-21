@@ -1147,6 +1147,7 @@ const Auth = () => {
                           <SelectItem value="service">Service Business</SelectItem>
                           <SelectItem value="hybrid">Both (Products & Services)</SelectItem>
                           <SelectItem value="restaurant">Restaurant / Food</SelectItem>
+                          <SelectItem value="producer">Producer / Manufacturer</SelectItem>
                           <SelectItem value="wholesale">Wholesale</SelectItem>
                           <SelectItem value="other">Other</SelectItem>
                         </SelectContent>

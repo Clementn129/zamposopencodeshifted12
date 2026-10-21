@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-export type BusinessType = 'retail' | 'service' | 'hybrid' | 'restaurant';
+export type BusinessType = 'retail' | 'service' | 'hybrid' | 'restaurant' | 'producer';
 
 interface BusinessTypeLabels {
   // Navigation & Headers
@@ -128,9 +128,32 @@ const RESTAURANT_LABELS: BusinessTypeLabels = {
   noItemsMessage: 'No menu items yet.',
 };
 
+const PRODUCER_LABELS: BusinessTypeLabels = {
+  productsTitle: 'Finished Goods',
+  productsDescription: 'Manage raw materials, sub-assemblies and finished goods.',
+  addButtonLabel: 'Add',
+  itemName: 'Product Name',
+  itemNamePlaceholder: 'Packed Maize Meal 25kg',
+  priceLabel: 'Selling Price (ZMW)',
+  quantityLabel: 'Qty',
+  stockLabel: 'Stock',
+  minStockLabel: 'Min Stock (alerts)',
+  categoryLabel: 'Category (optional)',
+  posItemsTitle: 'Products',
+  posItemsDescription: 'Tap to add to cart',
+  stockDisplay: (stock: number) => `Stock: ${stock}`,
+  receiptItemLabel: 'Item',
+  receiptQuantityPrefix: 'x',
+  showStock: true,
+  showDuration: false,
+  showNotes: false,
+  lowStockWarning: 'LOW',
+  noItemsMessage: 'No products yet.',
+};
+
 const STORAGE_KEY = 'zampos_business_type';
 
-const HEALTHY_TYPES: BusinessType[] = ['retail', 'service', 'hybrid', 'restaurant'];
+const HEALTHY_TYPES: BusinessType[] = ['retail', 'service', 'hybrid', 'restaurant', 'producer'];
 
 const isBusinessType = (v: string | null | undefined): v is BusinessType => {
   return !!v && (HEALTHY_TYPES as string[]).includes(v);
@@ -178,12 +201,14 @@ export function useBusinessType(businessId?: string, serverBusinessType?: string
     businessType === 'service' ? SERVICE_LABELS
     : businessType === 'hybrid' ? HYBRID_LABELS
     : businessType === 'restaurant' ? RESTAURANT_LABELS
+    : businessType === 'producer' ? PRODUCER_LABELS
     : RETAIL_LABELS;
 
   const isRetail = businessType === 'retail';
   const isService = businessType === 'service';
   const isHybrid = businessType === 'hybrid';
   const isRestaurant = businessType === 'restaurant';
+  const isProducer = businessType === 'producer';
 
   return {
     businessType,
@@ -193,5 +218,6 @@ export function useBusinessType(businessId?: string, serverBusinessType?: string
     isService,
     isHybrid,
     isRestaurant,
+    isProducer,
   };
 }

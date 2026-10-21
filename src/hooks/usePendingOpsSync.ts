@@ -306,6 +306,8 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                   track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
                   track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
                   expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
+                  ...(op.payload.product_type ? { product_type: op.payload.product_type } : {}),
+                  ...(op.payload.is_manufactured !== undefined ? { is_manufactured: op.payload.is_manufactured } : {}),
                 }).select('id');
 
                 if (createErr) {
@@ -393,6 +395,8 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
                 track_expiry: op.payload.track_expiry ?? op.payload.trackExpiry ?? false,
                 track_stock: op.payload.track_stock ?? op.payload.trackStock ?? true,
                 expiry_date: op.payload.expiry_date ?? op.payload.expiryDate ?? null,
+                ...(op.payload.product_type ? { product_type: op.payload.product_type } : {}),
+                ...(op.payload.is_manufactured !== undefined ? { is_manufactured: op.payload.is_manufactured } : {}),
               }).eq('id', op.payload.productId).eq('business_id', businessId);
               if (updateErr) throw updateErr;
               await clearResolvedPendingImage(op.payload.image_url);
@@ -644,6 +648,25 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               processed.push(op.id);
               break;
             }
+
+            case 'production_complete': {
+              // Offline production run. The cached stock was already moved on
+              // the device, so the server only needs to catch up. Idempotent:
+              // if the order is already COMPLETED (e.g. a prior partial sync),
+              // complete_production_order raises and we treat it as done.
+              const serverOrderId = op.payload.serverOrderId;
+              if (!serverOrderId) throw new Error('Production order id missing');
+              const { error: prodErr } = await (supabase.rpc as any)('complete_production_order', {
+                p_order_id: serverOrderId,
+              });
+              if (prodErr) {
+                const msg = String(prodErr.message || '').toLowerCase();
+                const alreadyDone = msg.includes('only pending or in-progress');
+                if (!alreadyDone) throw prodErr;
+              }
+              processed.push(op.id);
+              break;
+            }
           }
 
           // Success: remove the op immediately so a later failure, crash or
@@ -681,7 +704,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
         try {
           const { data: prodData } = await supabase
             .from('products')
-            .select('id, business_id, created_at, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, expiry_date')
+            .select('id, business_id, created_at, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, product_type, is_manufactured, expiry_date')
             .eq('business_id', businessId)
             .limit(25000);
           if (prodData) {

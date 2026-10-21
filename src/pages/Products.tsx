@@ -66,6 +66,7 @@ import { useBusiness } from "@/hooks/useBusiness";
 import { useProducts, Product } from "@/hooks/useProducts";
 import { useStockSync } from "@/hooks/useStockSync";
 import { useBusinessType } from "@/hooks/useBusinessType";
+import { type ProductType, PRODUCT_TYPE_LABELS } from "@/lib/manufacturing";
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { useCashierPermissions } from "@/hooks/useCashierPermissions";
 import { useBackdatePermission } from "@/hooks/useBackdatePermission";
@@ -109,7 +110,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   // Failed offline ops (e.g. a cashier quick-add) are owned by AppSyncManager;
   // surface them here so the owner can Retry/Discard instead of them failing silently.
   const { failedOps, retryFailedOps, clearFailedOps } = useSyncStatus();
-  const { labels, isService, isHybrid, isRestaurant } = useBusinessType(business?.id, business?.businessType);
+  const { labels, isService, isHybrid, isRestaurant, isProducer } = useBusinessType(business?.id, business?.businessType);
   const {
     categories,
     setCategories,
@@ -157,6 +158,10 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [itemType, setItemType] = useState<"product" | "service">(isService ? "service" : "product");
   const [trackExpiry, setTrackExpiry] = useState(false);
   const [expiryDate, setExpiryDate] = useState("");
+
+  // Manufacturing fields (producer business type only).
+  const [productType, setProductType] = useState<ProductType>("FINISHED_GOOD");
+  const [isManufactured, setIsManufactured] = useState(false);
 
   // Dish / recipe state for the product dialog (restaurant, non-variant only).
   const [isDish, setIsDish] = useState(false);
@@ -257,6 +262,8 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setItemType(isService ? "service" : "product");
     setTrackExpiry(false);
     setExpiryDate("");
+    setProductType("FINISHED_GOOD");
+    setIsManufactured(false);
     setIsDish(false);
     setRecipeLines([]);
     setRecipeLoadFailed(false);
@@ -285,6 +292,8 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setItemType(p.itemType ?? (isService ? "service" : "product"));
     setTrackExpiry(p.trackExpiry ?? false);
     setExpiryDate(p.expiryDate ?? "");
+    setProductType(((p as unknown as { productType?: ProductType }).productType) ?? "FINISHED_GOOD");
+    setIsManufactured(!!(p as unknown as { isManufactured?: boolean }).isManufactured);
     setOpen(true);
   };
 
@@ -409,6 +418,8 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
         ...(recipeSectionActive
           ? { is_dish: isDish, ...(isDish ? { track_stock: false } : {}) }
           : {}),
+        // Manufacturing classification (producer business type only).
+        ...(isProducer ? { product_type: productType, is_manufactured: isManufactured } : {}),
       };
 
       let createdId: string | null = null;
@@ -1555,6 +1566,37 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                     />
                   </div>
                 )}
+              </div>
+            )}
+
+            {isProducer && itemType !== "service" && (
+              <div className="space-y-3 border rounded-lg p-3 bg-muted/20">
+                <div className="space-y-2">
+                  <Label>Manufacturing Role</Label>
+                  <Select value={productType} onValueChange={(v) => setProductType(v as ProductType)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="RAW_MATERIAL">{PRODUCT_TYPE_LABELS.RAW_MATERIAL}</SelectItem>
+                      <SelectItem value="SUB_ASSEMBLY">{PRODUCT_TYPE_LABELS.SUB_ASSEMBLY}</SelectItem>
+                      <SelectItem value="FINISHED_GOOD">{PRODUCT_TYPE_LABELS.FINISHED_GOOD}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="is-manufactured" className="cursor-pointer">Manufactured in-house</Label>
+                  <input
+                    id="is-manufactured"
+                    type="checkbox"
+                    checked={isManufactured}
+                    onChange={(e) => setIsManufactured(e.target.checked)}
+                    className="toggle toggle-sm"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Finished goods and sub-assemblies can be produced from a Bill of Materials on the Production page.
+                </p>
               </div>
             )}
 

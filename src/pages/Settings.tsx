@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock, Factory } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -487,7 +487,7 @@ const Settings = () => {
               <RadioGroup
                 value={businessType}
                 onValueChange={(value) => handleBusinessTypeChange(value as BusinessType)}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4"
               >
                 <div className="flex items-center space-x-3 bg-secondary rounded-lg p-4 cursor-pointer hover:bg-secondary/80 transition">
                   <RadioGroupItem value="retail" id="retail" />
@@ -529,6 +529,16 @@ const Settings = () => {
                     <div>
                       <p className="font-medium">Restaurant / Food</p>
                       <p className="text-xs text-muted-foreground">Menu, orders, kitchen & tables</p>
+                    </div>
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-3 bg-secondary rounded-lg p-4 cursor-pointer hover:bg-secondary/80 transition">
+                  <RadioGroupItem value="producer" id="producer" />
+                  <Label htmlFor="producer" className="flex items-center gap-2 cursor-pointer flex-1">
+                    <Factory className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-medium">Producer / Manufacturer</p>
+                      <p className="text-xs text-muted-foreground">Raw materials, Bill of Materials & production</p>
                     </div>
                   </Label>
                 </div>

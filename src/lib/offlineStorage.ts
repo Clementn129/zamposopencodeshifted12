@@ -1607,7 +1607,8 @@ interface PendingOp {
     | 'debtor_delete'
     | 'quotation_create' | 'quotation_update' | 'quotation_delete'
     | 'delivery_note_create' | 'delivery_note_status' | 'delivery_note_delete'
-    | 'invoice_create' | 'invoice_update' | 'invoice_status' | 'invoice_pay' | 'invoice_delete';
+    | 'invoice_create' | 'invoice_update' | 'invoice_status' | 'invoice_pay' | 'invoice_delete'
+    | 'production_complete';
   payload: any;
   createdAt: string;
   retryCount?: number;

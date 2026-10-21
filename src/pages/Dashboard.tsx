@@ -17,7 +17,7 @@ import LowStockAlert from '@/components/LowStockAlert';
 import DashboardNotifications from '@/components/DashboardNotifications';
 import DashboardStats from '@/components/DashboardStats';
 
-import { Store, ShoppingCart, Package, CreditCard, LogOut, Copy, Receipt, Settings as SettingsIcon, Users, Wallet, Briefcase, BarChart3, FileClock, UserCheck, CalendarClock, ChefHat, LayoutGrid, Building2, HardHat } from 'lucide-react';
+import { Store, ShoppingCart, Package, CreditCard, LogOut, Copy, Receipt, Settings as SettingsIcon, Users, Wallet, Briefcase, BarChart3, FileClock, UserCheck, CalendarClock, ChefHat, LayoutGrid, Building2, HardHat, Factory } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -26,7 +26,7 @@ const Dashboard = () => {
   const { user, signOut, isLoading: authLoading } = useAuthContext();
   const { business, isLoading: businessLoading, error: businessError, refetch, checkSubscriptionStatus } = useBusiness(user?.id);
   const { isMultiBranch } = useBusinessContext();
-  const { labels, isService, isRestaurant } = useBusinessType(business?.id, business?.businessType);
+  const { labels, isService, isRestaurant, isProducer } = useBusinessType(business?.id, business?.businessType);
   const { toast } = useToast();
   const [hasSalesToday, setHasSalesToday] = useState(false);
   const [expiringProducts, setExpiringProducts] = useState<Array<{ name: string; expiryDate: string }>>([]);
@@ -288,6 +288,20 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
             </Link>
+
+            {isProducer && (
+              <Link to="/production">
+                <Card className="product-card h-full">
+                  <CardContent className="flex flex-col items-center justify-center p-6 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+                      <Factory className="w-7 h-7 text-primary" />
+                    </div>
+                    <h3 className="font-semibold">Production</h3>
+                    <p className="text-sm text-muted-foreground">BOM & work orders</p>
+                  </CardContent>
+                </Card>
+              </Link>
+            )}
 
             <Link to="/sales">
               <Card className="product-card h-full">

@@ -1502,11 +1502,13 @@ export type Database = {
           image_url: string | null
           is_active: boolean
           is_dish: boolean
+          is_manufactured: boolean
           item_type: string
           minimum_stock: number
           name: string
           parent_id: string | null
           price: number
+          product_type: string
           stock: number
           tax_category: string
           track_expiry: boolean
@@ -1525,11 +1527,13 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           is_dish?: boolean
+          is_manufactured?: boolean
           item_type?: string
           minimum_stock?: number
           name: string
           parent_id?: string | null
           price: number
+          product_type?: string
           stock?: number
           tax_category?: string
           track_expiry?: boolean
@@ -1548,11 +1552,13 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           is_dish?: boolean
+          is_manufactured?: boolean
           item_type?: string
           minimum_stock?: number
           name?: string
           parent_id?: string | null
           price?: number
+          product_type?: string
           stock?: number
           tax_category?: string
           track_expiry?: boolean
@@ -2192,6 +2198,112 @@ export type Database = {
         }
         Relationships: []
       }
+      bom_items: {
+        Row: {
+          business_id: string
+          component_product_id: string
+          created_at: string
+          finished_product_id: string
+          id: string
+          quantity_required: number
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          component_product_id: string
+          created_at?: string
+          finished_product_id: string
+          id?: string
+          quantity_required: number
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          component_product_id?: string
+          created_at?: string
+          finished_product_id?: string
+          id?: string
+          quantity_required?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bom_items_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bom_items_component_product_id_fkey"
+            columns: ["component_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bom_items_finished_product_id_fkey"
+            columns: ["finished_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      production_orders: {
+        Row: {
+          business_id: string
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          product_id: string
+          quantity_to_produce: number
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          product_id: string
+          quantity_to_produce: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          product_id?: string
+          quantity_to_produce?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_orders_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_orders_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       affiliate_referred_businesses: {
@@ -2236,6 +2348,10 @@ export type Database = {
         Args: { p_note?: string; p_request_id: string; p_effective_at?: string | null }
         Returns: string
       }
+      cancel_production_order: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      }
       check_rate_limit: {
         Args: {
           p_action: string
@@ -2247,6 +2363,26 @@ export type Database = {
       }
       convert_quotation_to_sale: {
         Args: { p_payment_method?: string; p_quotation_id: string }
+        Returns: string
+      }
+      complete_production_order: {
+        Args: { p_order_id: string }
+        Returns: string
+      }
+      delete_bom_item: {
+        Args: { p_bom_item_id: string }
+        Returns: undefined
+      }
+      save_bom_item: {
+        Args: {
+          p_component_product_id: string
+          p_finished_product_id: string
+          p_quantity_required: number
+        }
+        Returns: string
+      }
+      start_production_order: {
+        Args: { p_product_id: string; p_quantity: number }
         Returns: string
       }
       create_delivery_note_with_items: {

@@ -10,6 +10,7 @@ import { BusinessProvider } from "@/hooks/BusinessContext";
 import RequireOwner from "@/components/RequireOwner";
 import RequireKitchen from "@/components/RequireKitchen";
 import RequireMember from "@/components/RequireMember";
+import RequireManufacturer from "@/components/RequireManufacturer";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAUpdatePrompt } from "@/components/PWAUpdatePrompt";
 import { AppSyncManager } from "@/components/AppSyncManager";
@@ -42,6 +43,7 @@ const AuditLog = lazy(() => import("./pages/AuditLog"));
 const GroupOverview = lazy(() => import("./pages/GroupOverview").then((m) => ({ default: m.GroupOverview })));
 const Kitchen = lazy(() => import("./pages/Kitchen"));
 const DiningTabs = lazy(() => import("./pages/DiningTabs"));
+const Production = lazy(() => import("./pages/Production"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -100,6 +102,7 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
                       <Route path="/pos" element={<Pos />} />
                       <Route path="/kitchen" element={<RequireKitchen><Kitchen /></RequireKitchen>} />
                       <Route path="/tables" element={<RequireMember restaurantOnly><DiningTabs /></RequireMember>} />
+                      <Route path="/production" element={<RequireManufacturer><Production /></RequireManufacturer>} />
                       <Route path="/products" element={<RequireOwner allowManager><Products /></RequireOwner>} />
                       <Route path="/stock" element={<StockRequests />} />
                       <Route path="/subscription" element={<RequireOwner><Subscription /></RequireOwner>} />
