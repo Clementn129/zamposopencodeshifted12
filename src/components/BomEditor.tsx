@@ -209,10 +209,17 @@ const BomEditor = ({ products, bomItems, readOnly, onSave, onDelete }: Props) =>
               </div>
 
               {linesForSelected.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Estimated material cost per unit:{' '}
-                  <span className="font-medium text-foreground">K{unitCost.toFixed(2)}</span>
-                </p>
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">
+                    Estimated material cost per unit:{' '}
+                    <span className="font-medium text-foreground">K{unitCost.toFixed(2)}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    When the finished good has no cost price yet, saving this BOM fills it from its
+                    materials. A cost you set manually is kept — use “Sync cost from BOM” on the
+                    product to refresh it.
+                  </p>
+                </div>
               )}
             </>
           )}

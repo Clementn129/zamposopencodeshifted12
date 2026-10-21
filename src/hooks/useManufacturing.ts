@@ -5,6 +5,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useToast } from '@/hooks/use-toast';
 import {
   checkMaterialSufficiency,
+  computeBomUnitCost,
   computeProductionDeltas,
   formatShortfallMessage,
   type BomLine,
@@ -37,6 +38,10 @@ export type ProductionOrder = {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  /** Material cost of one finished unit, snapshotted at completion. */
+  unitCost: number;
+  /** unitCost * quantityToProduce, snapshotted at completion. */
+  totalCost: number;
   /** true when this order was created offline and has not synced yet. */
   pendingSync?: boolean;
 };
@@ -58,6 +63,8 @@ const mapOrder = (row: ProductionOrderRow): ProductionOrder => ({
   startedAt: row.started_at,
   completedAt: row.completed_at,
   createdAt: row.created_at,
+  unitCost: Number(row.unit_cost ?? 0),
+  totalCost: Number(row.total_cost ?? 0),
 });
 
 export interface UseManufacturing {
@@ -71,6 +78,7 @@ export interface UseManufacturing {
   startOrder: (productId: string, quantity: number) => Promise<boolean>;
   completeOrder: (orderId: string) => Promise<boolean>;
   cancelOrder: (orderId: string) => Promise<boolean>;
+  reverseOrder: (orderId: string) => Promise<boolean>;
 }
 
 /**
@@ -268,6 +276,18 @@ export function useManufacturing(businessId?: string, enabled = true): UseManufa
           await updateCachedProductStock(productId, current + delta);
         }
 
+        // Snapshot the material cost from the cached component costs so the
+        // offline order shows a cost immediately (the server recomputes its own
+        // authoritative value when the queued op replays).
+        const costById = new Map<string, number | null | undefined>(
+          cachedProducts.map((p) => [p.id, p.costPrice ?? null])
+        );
+        const unitCost = computeBomUnitCost(
+          bomRes.map((b) => ({ componentProductId: b.componentProductId, quantityRequired: b.quantityRequired })),
+          costById
+        );
+        const totalCost = unitCost * order.quantityToProduce;
+
         const offlineOrderId = generateOfflineId();
         await queuePendingOp({
           id: offlineOrderId,
@@ -278,6 +298,8 @@ export function useManufacturing(businessId?: string, enabled = true): UseManufa
             serverOrderId: order.id,
             productId: order.productId,
             quantity: order.quantityToProduce,
+            unitCost,
+            totalCost,
             bom: bomRes.map((b) => ({
               componentProductId: b.componentProductId,
               quantityRequired: b.quantityRequired,
@@ -289,7 +311,14 @@ export function useManufacturing(businessId?: string, enabled = true): UseManufa
         setOrders((prev) =>
           prev.map((o) =>
             o.id === orderId
-              ? { ...o, status: 'COMPLETED', completedAt: new Date().toISOString(), pendingSync: true }
+              ? {
+                  ...o,
+                  status: 'COMPLETED',
+                  completedAt: new Date().toISOString(),
+                  unitCost,
+                  totalCost,
+                  pendingSync: true,
+                }
               : o
           )
         );
@@ -352,6 +381,38 @@ export function useManufacturing(businessId?: string, enabled = true): UseManufa
     [isOnline, refetch, notifyChanged, toast]
   );
 
+  // Undo a COMPLETED run: adds materials back and removes the finished good.
+  const reverseOrder = useCallback(
+    async (orderId: string): Promise<boolean> => {
+      if (!isOnline) {
+        toast({
+          variant: 'destructive',
+          title: 'Offline',
+          description: 'Reversing a completed order needs a connection.',
+        });
+        return false;
+      }
+      try {
+        const { error } = await (supabase.rpc as any)('reverse_production_order', {
+          p_order_id: orderId,
+        });
+        if (error) throw error;
+        await refetch();
+        notifyChanged();
+        toast({ title: 'Production reversed', description: 'Materials returned, finished good removed.' });
+        return true;
+      } catch (e) {
+        toast({
+          variant: 'destructive',
+          title: 'Could not reverse order',
+          description: e instanceof Error ? e.message : 'Try again',
+        });
+        return false;
+      }
+    },
+    [isOnline, refetch, notifyChanged, toast]
+  );
+
   return {
     bomItems,
     orders,
@@ -363,5 +424,6 @@ export function useManufacturing(businessId?: string, enabled = true): UseManufa
     startOrder,
     completeOrder,
     cancelOrder,
+    reverseOrder,
   };
 }

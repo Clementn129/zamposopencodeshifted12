@@ -297,6 +297,38 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setOpen(true);
   };
 
+  const [syncingCost, setSyncingCost] = useState(false);
+
+  // Recompute a manufactured product's cost from its Bill of Materials.
+  const syncCostFromBom = async () => {
+    if (!editing) return;
+    setSyncingCost(true);
+    try {
+      const { data, error } = await (supabase.rpc as unknown as (
+        fn: string,
+        args: Record<string, unknown>
+      ) => Promise<{ data: number | null; error: { message: string } | null }>)(
+        "sync_manufactured_cost",
+        { p_product_id: editing.id }
+      );
+      if (error) throw new Error(error.message);
+      const value = Number(data ?? 0);
+      setCostPrice(value ? String(value) : "");
+      toast({
+        title: "Cost synced from BOM",
+        description: `Cost price set to K${value.toFixed(2)}. Save to keep it.`,
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not sync cost",
+        description: e instanceof Error ? e.message : "Try again",
+      });
+    } finally {
+      setSyncingCost(false);
+    }
+  };
+
   // Load an existing dish's recipe when the edit dialog opens. A failed load
   // blocks recipe saving so we never wipe a recipe we could not read.
   useEffect(() => {
@@ -1455,6 +1487,18 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                   onChange={(e) => setCostPrice(e.target.value)}
                   placeholder="0"
                 />
+                {isProducer && editing && (editing as unknown as { isManufactured?: boolean }).isManufactured && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    disabled={syncingCost}
+                    onClick={() => void syncCostFromBom()}
+                  >
+                    {syncingCost ? "Syncing..." : "Sync cost from BOM"}
+                  </Button>
+                )}
               </div>
             </div>
 

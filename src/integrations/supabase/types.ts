@@ -2254,6 +2254,7 @@ export type Database = {
         Row: {
           business_id: string
           completed_at: string | null
+          cost_snapshotted_at: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -2261,11 +2262,14 @@ export type Database = {
           quantity_to_produce: number
           started_at: string | null
           status: string
+          total_cost: number
+          unit_cost: number
           updated_at: string
         }
         Insert: {
           business_id: string
           completed_at?: string | null
+          cost_snapshotted_at?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -2273,11 +2277,14 @@ export type Database = {
           quantity_to_produce: number
           started_at?: string | null
           status?: string
+          total_cost?: number
+          unit_cost?: number
           updated_at?: string
         }
         Update: {
           business_id?: string
           completed_at?: string | null
+          cost_snapshotted_at?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -2285,6 +2292,8 @@ export type Database = {
           quantity_to_produce?: number
           started_at?: string | null
           status?: string
+          total_cost?: number
+          unit_cost?: number
           updated_at?: string
         }
         Relationships: [
@@ -2373,6 +2382,14 @@ export type Database = {
         Args: { p_bom_item_id: string }
         Returns: undefined
       }
+      recompute_manufactured_cost: {
+        Args: { p_finished_product_id: string; p_force?: boolean }
+        Returns: number
+      }
+      reverse_production_order: {
+        Args: { p_order_id: string }
+        Returns: string
+      }
       save_bom_item: {
         Args: {
           p_component_product_id: string
@@ -2384,6 +2401,10 @@ export type Database = {
       start_production_order: {
         Args: { p_product_id: string; p_quantity: number }
         Returns: string
+      }
+      sync_manufactured_cost: {
+        Args: { p_product_id: string }
+        Returns: number
       }
       create_delivery_note_with_items: {
         Args: { p_business_id: string; p_header: Json; p_items: Json }

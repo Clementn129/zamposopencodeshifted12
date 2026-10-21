@@ -87,3 +87,42 @@ export const saleTotals = (items: SaleItemMath[] | null | undefined): SaleTotals
     net: Math.round(net * 100) / 100,
   };
 };
+
+// ---------------------------------------------------------------------------
+// Profit — ONE definition, shared by Reports and Sales History so the two pages
+// can never disagree again.
+//
+//   grossProfit = revenue − tax − cogs
+//   netProfit   = grossProfit − businessExpenses − ownerDrawings
+//
+// * `revenue` is TAX-INCLUSIVE (prices are entered incl. VAT); `tax` is the
+//   extracted portion owed onward, so it is removed from profit.
+// * `cogs` is the cost of the goods sold (from the sale-line cost snapshot).
+// * Owner drawings are a distribution of profit, not an operating expense —
+//   they are subtracted here so "net profit" reflects what the business
+//   actually retained, matching the Sales History view.
+// ---------------------------------------------------------------------------
+export type ProfitInputs = {
+  revenue: number;
+  tax: number;
+  cogs: number;
+  businessExpenses?: number;
+  ownerDrawings?: number;
+};
+
+export type ProfitResult = {
+  grossProfit: number;
+  netProfit: number;
+};
+
+export const computeProfit = ({
+  revenue,
+  tax,
+  cogs,
+  businessExpenses = 0,
+  ownerDrawings = 0,
+}: ProfitInputs): ProfitResult => {
+  const grossProfit = (Number(revenue) || 0) - (Number(tax) || 0) - (Number(cogs) || 0);
+  const netProfit = grossProfit - (Number(businessExpenses) || 0) - (Number(ownerDrawings) || 0);
+  return { grossProfit, netProfit };
+};

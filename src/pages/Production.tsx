@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Factory, Plus, Loader2, Play, CheckCircle2, XCircle, Clock, Boxes } from 'lucide-react';
+import { ArrowLeft, Factory, Plus, Loader2, Play, CheckCircle2, XCircle, Clock, Boxes, Undo2 } from 'lucide-react';
 import { useBusiness } from '@/hooks/useBusiness';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useProducts } from '@/hooks/useProducts';
@@ -42,6 +42,7 @@ const Production = () => {
     startOrder,
     completeOrder,
     cancelOrder,
+    reverseOrder,
   } = useManufacturing(business?.id);
 
   const readOnly = role === 'cashier';
@@ -89,6 +90,21 @@ const Production = () => {
   const handleCancel = async (order: ProductionOrder) => {
     setBusyOrderId(order.id);
     await cancelOrder(order.id);
+    setBusyOrderId(null);
+  };
+
+  const handleReverse = async (order: ProductionOrder) => {
+    const product = productById.get(order.productId);
+    const name = product?.name ?? 'this product';
+    const ok = window.confirm(
+      `Reverse this completed run?\n\n` +
+        `• ${order.quantityToProduce} × "${name}" will be removed from stock.\n` +
+        `• The raw materials will be added back.\n\n` +
+        `This cannot be undone. If the finished goods were already sold, reverse will be refused.`
+    );
+    if (!ok) return;
+    setBusyOrderId(order.id);
+    await reverseOrder(order.id);
     setBusyOrderId(null);
   };
 
@@ -215,6 +231,17 @@ const Production = () => {
                                 <span className="ml-1">Cancel</span>
                               </Button>
                             </div>
+                          )}
+                          {!readOnly && o.status === 'COMPLETED' && !o.pendingSync && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button size="sm" variant="outline" onClick={() => handleReverse(o)} disabled={busy}>
+                                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                                <span className="ml-1">Reverse</span>
+                              </Button>
+                            </div>
+                          )}
+                          {o.status === 'COMPLETED' && o.pendingSync && (
+                            <span className="text-xs text-muted-foreground shrink-0">Sync to reverse</span>
                           )}
                           {isOpen && o.status === 'PENDING' && readOnly && (
                             <Clock className="h-4 w-4 text-muted-foreground" />

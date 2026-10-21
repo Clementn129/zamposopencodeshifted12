@@ -23,7 +23,7 @@ import { getUnsyncedSales, cacheSalesHistory, getCachedSalesHistory, cacheExpens
 import { exportSalesToCsv } from "@/lib/csvExport";
 import { dateString, parseDateString } from "@/lib/dates";
 import { useToast } from "@/hooks/use-toast";
-import { lineRevenue, lineCost, lineQty } from "@/lib/saleMath";
+import { lineRevenue, lineCost, lineQty, computeProfit } from "@/lib/saleMath";
 
 
 type SaleItem = {
@@ -504,7 +504,15 @@ const SalesHistory = () => {
 
     // Tax collected is owed onward, not profit (matches Reports) — exclude it
     // from the profit basis before subtracting outflows.
-    const netProfit = (hasCostData ? totalProfit : totalRevenue) - taxCollected - totalOutflows;
+    // One profit definition shared with Reports (src/lib/saleMath.ts).
+    const cogsForProfit = hasCostData ? totalCost : 0;
+    const { grossProfit, netProfit } = computeProfit({
+      revenue: totalRevenue,
+      tax: taxCollected,
+      cogs: cogsForProfit,
+      businessExpenses,
+      ownerDrawings,
+    });
     const netCashPosition = totalCashReceived - totalOutflows;
 
     return {
@@ -519,7 +527,7 @@ const SalesHistory = () => {
       cashFromDebtors,
       netProfit,
       netCashPosition,
-      totalProfit,
+      totalProfit: grossProfit,
       totalCost,
       hasCostData,
       transactionCount: countableSales.length,
@@ -570,14 +578,22 @@ const SalesHistory = () => {
     // Tax collected is owed onward, not profit (matches Reports) — exclude it
     // from the profit basis. Revenue and profit figures are tax-inclusive, so
     // the extracted tax is subtracted before outflows.
-    const netProfit = (hasCostData ? totalProfit : totalRevenue) - taxCollected - totalOutflows;
+    // One profit definition shared with Reports (src/lib/saleMath.ts).
+    const cogsForProfit = hasCostData ? totalCost : 0;
+    const { grossProfit, netProfit } = computeProfit({
+      revenue: totalRevenue,
+      tax: taxCollected,
+      cogs: cogsForProfit,
+      businessExpenses,
+      ownerDrawings,
+    });
 
     return {
       totalRevenue, totalSales, cashSales, mobileSales, avgSale,
       totalExpenses: businessExpenses,
       ownerDrawings,
       totalOutflows,
-      netProfit, totalProfit, totalCost, hasCostData,
+      netProfit, totalProfit: grossProfit, totalCost, hasCostData,
       taxCollected, taxableSales, zeroRatedSales, exemptSales,
     };
   }, [filteredSales, filteredExpenses]);

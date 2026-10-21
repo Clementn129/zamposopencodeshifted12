@@ -45,7 +45,7 @@ const mapRowToProduct = (row: ProductRow): Product => ({
   businessId: row.business_id,
   name: row.name,
   price: Number(row.price),
-  costPrice: row.cost_price ? Number(row.cost_price) : null,
+  costPrice: row.cost_price != null ? Number(row.cost_price) : null,
   stock: Number(row.stock),
   minimumStock: Number(row.minimum_stock ?? 5),
   category: row.category,

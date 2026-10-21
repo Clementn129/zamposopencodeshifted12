@@ -5,6 +5,8 @@ import { format, subDays, subMonths, startOfMonth, endOfMonth, startOfYear, endO
 import { lusakaDayRange, lusakaWeekRange, lusakaMonthRange, lusakaDateLabel } from "@/lib/dateRange";
 import { useBusinessType } from "@/hooks/useBusinessType";
 import IngredientsReport from "@/components/IngredientsReport";
+import ProductionReport from "@/components/ProductionReport";
+import { computeProfit } from "@/lib/saleMath";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -101,9 +103,9 @@ const Reports = () => {
   const { isOnline } = useOnlineStatus();
   const { user, isLoading: authLoading } = useAuthContext();
   const { business, isLoading: bizLoading } = useBusiness(user?.id);
-  const { isRestaurant } = useBusinessType(business?.id, business?.businessType);
+  const { isRestaurant, isProducer } = useBusinessType(business?.id, business?.businessType);
   const [period, setPeriod] = useState<Period>("today");
-  const [reportView, setReportView] = useState<"sales" | "stock" | "tickets" | "items" | "ingredients">(
+  const [reportView, setReportView] = useState<"sales" | "stock" | "tickets" | "items" | "ingredients" | "production">(
     (location.state as { view?: string } | null)?.view === "tickets" ? "tickets" : "sales"
   );
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
@@ -456,23 +458,21 @@ const Reports = () => {
     const active = sales.filter((s) => s.status !== "refunded");
     const revenue = active.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
     const tax = active.reduce((sum, s) => sum + (Number(s.tax_amount) || 0), 0);
-    const cogs = active.reduce((sum, s) => {
+    // Discount-aware COGS, matching Sales History (lineCost).
+    let cogs = 0;
+    let hasCostData = false;
+    for (const s of active) {
       const items = Array.isArray(s.items) ? s.items : [];
-      return sum + items.reduce((c: number, it: any) => {
-        const unitCost = Number(it.costPrice ?? it.cost_price ?? it.cost ?? 0) || 0;
-        return c + unitCost * (Number(it.quantity) || 0);
-      }, 0);
-    }, 0);
-    // Guard: when no line carries a cost price the profit figures assume zero
-    // cost, which overstates profit. Flag it so the UI can say so.
-    const hasCostData = active.some((s) =>
-      (Array.isArray(s.items) ? s.items : []).some((it: any) => (Number(it.costPrice ?? it.cost_price ?? it.cost ?? 0) || 0) > 0),
-    );
+      for (const it of items) {
+        const unitCost = Number(it?.costPrice ?? it?.cost_price ?? it?.cost ?? 0) || 0;
+        cogs += unitCost * (Number(it?.quantity) || 0);
+        if (unitCost > 0) hasCostData = true;
+      }
+    }
     const businessExp = expenses.filter((e) => e.category !== "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
     const drawings = expenses.filter((e) => e.category === "personal").reduce((s, e) => s + Number(e.amount || 0), 0);
-    // Tax collected is owed onward, not profit — exclude it from gross profit.
-    const grossProfit = revenue - tax - cogs;
-    const netProfit = grossProfit - businessExp;
+    // One profit definition shared with Sales History.
+    const { grossProfit, netProfit } = computeProfit({ revenue, tax, cogs, businessExpenses: businessExp, ownerDrawings: drawings });
     const outstanding = debtors.reduce((s, d) => s + Math.max(0, Number(d.amount_owed || 0) - Number(d.amount_paid || 0)), 0);
     const byPayment: Record<string, number> = {};
     active.forEach((s) => {
@@ -747,6 +747,53 @@ const Reports = () => {
     toast({ title: "Item history exported" });
   };
 
+  const exportProductionCsv = async () => {
+    if (!business?.id) return;
+    if (!isOnline) {
+      toast({ variant: "destructive", title: "Offline", description: "Production CSV needs a connection." });
+      return;
+    }
+    try {
+      const [{ data: orders }, { data: prods }] = await Promise.all([
+        supabase
+          .from("production_orders")
+          .select("id, product_id, quantity_to_produce, unit_cost, total_cost, completed_at, created_at")
+          .eq("business_id", business.id)
+          .eq("status", "COMPLETED")
+          .gte("completed_at", range.from.toISOString())
+          .lte("completed_at", range.to.toISOString())
+          .order("completed_at", { ascending: false })
+          .limit(5000),
+        supabase.from("products").select("id, name").eq("business_id", business.id).limit(5000),
+      ]);
+      const nameById = new Map<string, string>((prods ?? []).map((p) => [p.id, p.name]));
+      const rows: string[][] = [
+        ["Date", "Product", "Quantity", "Unit Cost (ZMW)", "Total Cost (ZMW)", "Order ID"],
+      ];
+      for (const o of orders ?? []) {
+        rows.push([
+          format(new Date(o.completed_at ?? o.created_at), "yyyy-MM-dd HH:mm"),
+          `"${String(nameById.get(o.product_id) ?? "Unknown").replace(/"/g, '""')}"`,
+          String(o.quantity_to_produce ?? 0),
+          Number(o.unit_cost ?? 0).toFixed(2),
+          Number(o.total_cost ?? 0).toFixed(2),
+          o.id,
+        ]);
+      }
+      const csv = rows.map((r) => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `production-${format(range.from, "yyyyMMdd")}-${format(range.to, "yyyyMMdd")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Production report exported" });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Export failed", description: e instanceof Error ? e.message : "Try again" });
+    }
+  };
+
   if (authLoading || bizLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   if (!business) return null;
 
@@ -764,19 +811,20 @@ const Reports = () => {
               </div>
             </div>
             {reportView !== "ingredients" && (
-              <Button size="sm" variant="outline" onClick={reportView === "stock" ? exportStockCsv : reportView === "tickets" ? exportTicketsCsv : reportView === "items" ? exportItemHistoryCsv : exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
+              <Button size="sm" variant="outline" onClick={reportView === "stock" ? exportStockCsv : reportView === "tickets" ? exportTicketsCsv : reportView === "items" ? exportItemHistoryCsv : reportView === "production" ? exportProductionCsv : exportCsv}><Download className="w-4 h-4 mr-1" /> CSV</Button>
             )}
           </div>
         </header>
 
         <main className="p-4 max-w-4xl mx-auto space-y-4">
-          <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock" | "tickets" | "items" | "ingredients")}>
-            <TabsList className={`flex w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:justify-center md:overflow-visible md:grid ${isRestaurant ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
+          <Tabs value={reportView} onValueChange={(v) => setReportView(v as "sales" | "stock" | "tickets" | "items" | "ingredients" | "production")}>
+            <TabsList className={`flex w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:justify-center md:overflow-visible md:grid ${isRestaurant ? "md:grid-cols-5" : isProducer ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
               <TabsTrigger value="sales" className="shrink-0">Sales & Profit</TabsTrigger>
               <TabsTrigger value="stock" className="shrink-0">Stock</TabsTrigger>
               {isRestaurant && <TabsTrigger value="tickets" className="shrink-0">Tickets</TabsTrigger>}
               <TabsTrigger value="items" className="shrink-0">Item History</TabsTrigger>
               {isRestaurant && <TabsTrigger value="ingredients" className="shrink-0">Ingredients</TabsTrigger>}
+              {isProducer && <TabsTrigger value="production" className="shrink-0">Production</TabsTrigger>}
             </TabsList>
           </Tabs>
 
@@ -1084,6 +1132,48 @@ const Reports = () => {
 
               {business?.id && (
                 <IngredientsReport
+                  businessId={business.id}
+                  from={range.from}
+                  to={range.to}
+                  periodLabel={periodLabel}
+                />
+              )}
+            </>
+          )}
+
+          {reportView === "production" && (
+            <>
+              <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)}>
+                <TabsList className="grid grid-cols-3 w-full">
+                  <TabsTrigger value="today">Today</TabsTrigger>
+                  <TabsTrigger value="week">This Week</TabsTrigger>
+                  <TabsTrigger value="month">{MONTHS[selectedMonth]} {selectedYear}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {period === "month" && (
+                <div className="flex gap-2">
+                  <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Month" /></SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m, i) => (
+                        <SelectItem key={i} value={String(i)}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+                    <SelectTrigger className="w-28"><SelectValue placeholder="Year" /></SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 10 }, (_, i) => selectedYear - 5 + i).map((y) => (
+                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {business?.id && (
+                <ProductionReport
                   businessId={business.id}
                   from={range.from}
                   to={range.to}
