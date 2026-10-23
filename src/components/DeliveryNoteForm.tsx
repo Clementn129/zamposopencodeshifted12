@@ -29,6 +29,8 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
   const [deliveryAddress, setDeliveryAddress] = useState(existingNote?.deliveryAddress || "");
   const [driverName, setDriverName] = useState(existingNote?.driverName || "");
   const [carPlate, setCarPlate] = useState(existingNote?.carPlate || "");
+  const [deliveredBy, setDeliveredBy] = useState(existingNote?.deliveredBy || "");
+  const [receivedBy, setReceivedBy] = useState(existingNote?.receivedBy || "");
   const [notes, setNotes] = useState(existingNote?.notes || "");
   const [status, setStatus] = useState<DeliveryNote['status']>(existingNote?.status || 'pending');
   const [markComplete, setMarkComplete] = useState(existingNote?.status === 'completed');
@@ -86,6 +88,8 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
         deliveryAddress: deliveryAddress || null,
         driverName: driverName || null,
         carPlate: carPlate || null,
+        deliveredBy: deliveredBy || null,
+        receivedBy: receivedBy || null,
         notes: notes || null,
         status: markComplete ? 'completed' : status,
         quotationId: quotationId || null,
@@ -158,6 +162,10 @@ const DeliveryNoteForm = ({ products, existingNote, quotationId, quotationItems,
               <div className="grid grid-cols-2 gap-2">
                 <Input placeholder="Driver name (optional)" value={driverName} onChange={e => setDriverName(e.target.value)} />
                 <Input placeholder="Car plate (optional)" value={carPlate} onChange={e => setCarPlate(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Delivered by" value={deliveredBy} onChange={e => setDeliveredBy(e.target.value)} />
+                <Input placeholder="Received by" value={receivedBy} onChange={e => setReceivedBy(e.target.value)} />
               </div>
               <Textarea placeholder="Notes (optional)" value={notes} onChange={e => setNotes(e.target.value)} className="h-16" />
             </CardContent>

@@ -119,6 +119,11 @@ interface CachedBusiness {
   customTaxName?: string | null;
   customTaxRate?: number | null;
   tpin?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBranch?: string | null;
+  bankSwift?: string | null;
   logoUrl?: string | null;
   vatNumber?: string | null;
   businessType?: string | null;

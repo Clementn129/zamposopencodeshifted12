@@ -38,6 +38,11 @@ export interface Business {
   address?: string | null;
   logoUrl?: string | null;
   tpin?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBranch?: string | null;
+  bankSwift?: string | null;
   taxMode: 'none' | 'vat' | 'custom';
   vatNumber?: string | null;
   vatRate: number;
@@ -95,6 +100,11 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
   address: row.address,
   logoUrl: row.logo_url,
   tpin: row.tpin,
+  bankName: row.bank_name,
+  bankAccountName: row.bank_account_name,
+  bankAccountNumber: row.bank_account_number,
+  bankBranch: row.bank_branch,
+  bankSwift: row.bank_swift,
   taxMode: (row.tax_mode ?? 'none') as Business['taxMode'],
   vatNumber: row.vat_number,
   vatRate: Number(row.vat_rate ?? 16),
@@ -179,6 +189,11 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       customTaxName: row.custom_tax_name,
       customTaxRate: row.custom_tax_rate != null ? Number(row.custom_tax_rate) : null,
       tpin: row.tpin,
+      bankName: row.bank_name,
+      bankAccountName: row.bank_account_name,
+      bankAccountNumber: row.bank_account_number,
+      bankBranch: row.bank_branch,
+      bankSwift: row.bank_swift,
       logoUrl: row.logo_url,
       vatNumber: row.vat_number,
       planTier: (row as unknown as Record<string, unknown>).plan_tier
@@ -229,6 +244,11 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         customTaxName: cachedBiz.customTaxName ?? null,
         customTaxRate: cachedBiz.customTaxRate ?? null,
         tpin: cachedBiz.tpin ?? null,
+        bankName: cachedBiz.bankName ?? null,
+        bankAccountName: cachedBiz.bankAccountName ?? null,
+        bankAccountNumber: cachedBiz.bankAccountNumber ?? null,
+        bankBranch: cachedBiz.bankBranch ?? null,
+        bankSwift: cachedBiz.bankSwift ?? null,
         logoUrl: cachedBiz.logoUrl ?? null,
         vatNumber: cachedBiz.vatNumber ?? null,
         planTier: cachedBiz.planTier ?? null,

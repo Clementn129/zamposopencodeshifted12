@@ -8,7 +8,18 @@ import jsPDF from "jspdf";
 interface QuotationViewProps {
   quotation: Quotation;
   businessName: string;
-  businessDetails: { phone?: string | null; email?: string | null; address?: string | null; logoUrl?: string | null; tpin?: string | null };
+  businessDetails: {
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    logoUrl?: string | null;
+    tpin?: string | null;
+    bankName?: string | null;
+    bankAccountName?: string | null;
+    bankAccountNumber?: string | null;
+    bankBranch?: string | null;
+    bankSwift?: string | null;
+  };
   onBack: () => void;
   onEdit: () => void;
   onConvert: () => void;
@@ -28,6 +39,13 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 const QuotationView = ({ quotation, businessName, businessDetails, onBack, onEdit, onConvert, onCreateDeliveryNote, onCreateInvoice }: QuotationViewProps) => {
   const items = quotation.items || [];
   const status = statusConfig[quotation.status] || statusConfig.draft;
+  const bankRows = [
+    { label: 'Bank', value: businessDetails.bankName },
+    { label: 'Account Name', value: businessDetails.bankAccountName },
+    { label: 'Account Number', value: businessDetails.bankAccountNumber },
+    { label: 'Branch', value: businessDetails.bankBranch },
+    { label: 'SWIFT / Sort Code', value: businessDetails.bankSwift },
+  ].filter((row) => !!row.value);
 
   const loadImageAsBase64 = (url: string): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -220,6 +238,24 @@ const QuotationView = ({ quotation, businessName, businessDetails, onBack, onEdi
     doc.text(`K${quotation.total.toFixed(2)}`, w - 18, y + 7, { align: "right" });
     y += 18;
 
+    // === PAYMENT DETAILS ===
+    if (bankRows.length > 0) {
+      ensureSpace(bankRows.length * 4 + 14);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(80, 80, 80);
+      doc.text("PAYMENT DETAILS", margin, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      bankRows.forEach((row) => {
+        doc.text(`${row.label}: ${row.value}`, margin, y);
+        y += 4;
+      });
+      y += 4;
+    }
+
     // === NOTES ===
     if (quotation.notes) {
       doc.setFontSize(8);
@@ -409,6 +445,20 @@ const QuotationView = ({ quotation, businessName, businessDetails, onBack, onEdi
               </div>
             </div>
           </div>
+
+          {/* Payment details */}
+          {bankRows.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payment Details</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                {bankRows.map((row) => (
+                  <p key={row.label}>
+                    <span className="text-muted-foreground">{row.label}:</span> {row.value}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Notes */}
           {quotation.notes && (

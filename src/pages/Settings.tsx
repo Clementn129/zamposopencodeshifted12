@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock, Factory } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock, Factory, Landmark } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,6 +42,12 @@ const Settings = () => {
   const [address, setAddress] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [bankName, setBankName] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankSwift, setBankSwift] = useState('');
+  const [bankSaving, setBankSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Hydrate the form once per business id. A connectivity flap that refetches
   // the same business must not wipe in-progress edits.
@@ -299,6 +305,11 @@ const Settings = () => {
       setEmail(business.email || '');
       setAddress(business.address || '');
       setLogoUrl(business.logoUrl || null);
+      setBankName(business.bankName || '');
+      setBankAccountName(business.bankAccountName || '');
+      setBankAccountNumber(business.bankAccountNumber || '');
+      setBankBranch(business.bankBranch || '');
+      setBankSwift(business.bankSwift || '');
       setTaxMode(business.taxMode || 'none');
       setVatNumber(business.vatNumber || '');
       setVatRate(String(business.vatRate ?? 16));
@@ -434,6 +445,48 @@ const Settings = () => {
       toast({ variant: 'destructive', title: 'Failed', description: e?.message ?? 'Could not save settings' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveBankDetails = async () => {
+    if (!business?.id) return;
+
+    setBankSaving(true);
+    const updates = {
+      bank_name: bankName.trim() || null,
+      bank_account_name: bankAccountName.trim() || null,
+      bank_account_number: bankAccountNumber.trim() || null,
+      bank_branch: bankBranch.trim() || null,
+      bank_swift: bankSwift.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Bank details saved offline', description: 'Changes will sync when connected.' });
+        return;
+      }
+
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+
+      toast({ title: 'Bank details saved', description: 'They will appear on quotations, invoices and delivery notes.' });
+      await refetch();
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save bank details',
+      });
+    } finally {
+      setBankSaving(false);
     }
   };
 
@@ -685,6 +738,84 @@ const Settings = () => {
                 </div>
                 <p className="text-xs text-muted-foreground">Shown on receipts, quotations and invoices.</p>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Bank Details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Landmark className="h-5 w-5" /> Bank Details</CardTitle>
+              <CardDescription>
+                Printed on quotations, invoices and delivery notes so customers know where to pay.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bank-name">Bank Name</Label>
+                  <Input
+                    id="bank-name"
+                    type="text"
+                    placeholder="e.g. Zanaco"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bank-account-name">Account Name</Label>
+                  <Input
+                    id="bank-account-name"
+                    type="text"
+                    placeholder="Business account name"
+                    value={bankAccountName}
+                    onChange={(e) => setBankAccountName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bank-account-number">Account Number</Label>
+                  <Input
+                    id="bank-account-number"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Account number"
+                    value={bankAccountNumber}
+                    onChange={(e) => setBankAccountNumber(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bank-branch">Branch</Label>
+                  <Input
+                    id="bank-branch"
+                    type="text"
+                    placeholder="Branch / sort code"
+                    value={bankBranch}
+                    onChange={(e) => setBankBranch(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="bank-swift">SWIFT / Sort Code (optional)</Label>
+                  <Input
+                    id="bank-swift"
+                    type="text"
+                    placeholder="e.g. ZNCOZMLU"
+                    value={bankSwift}
+                    onChange={(e) => setBankSwift(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <Button
+                variant="pos"
+                className="w-full"
+                onClick={handleSaveBankDetails}
+                disabled={bankSaving}
+              >
+                {bankSaving ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</>
+                ) : (
+                  <><Save className="mr-2 h-4 w-4" /> Save Details</>
+                )}
+              </Button>
             </CardContent>
           </Card>
 

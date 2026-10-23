@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { useOnlineStatus, checkSupabaseReachable } from '@/hooks/useOnlineStatus';
 import {
   persistOfflineSession,
   readOfflineSessionRecord,
@@ -52,30 +53,25 @@ interface AuthState {
 }
 
 export const useAuth = () => {
-  // Offline logins have no Supabase session to boot from, so restore one
-  // synchronously — otherwise a reload always starts at the login screen.
-  const [authState, setAuthState] = useState<AuthState>(() => {
-    const restored = readOfflineSessionRecord();
-    if (restored) {
-      const session = buildOfflineSession(restored);
-      return {
-        user: session.user,
-        session,
-        isLoading: false,
-        isSuperAdmin: restored.role === 'super_admin',
-        role: (restored.role as UserRole) || 'unknown',
-        isPasswordRecovery: false,
-      };
-    }
-    return {
-      user: null,
-      session: null,
-      isLoading: true,
-      isSuperAdmin: false,
-      role: 'unknown',
-      isPasswordRecovery: false,
-    };
-  });
+  const { isOnline } = useOnlineStatus();
+  const isOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  // Offline logins have no Supabase session (the token below is a local
+  // sentinel), so requests made with one reach PostgREST as `anon`. On a
+  // reachable network we must never install such a session — otherwise the
+  // app silently loses its authenticated identity and every RPC/RLS call
+  // fails with "permission denied". Only restore it when actually offline.
+  const [authState, setAuthState] = useState<AuthState>(() => ({
+    user: null,
+    session: null,
+    isLoading: true,
+    isSuperAdmin: false,
+    role: 'unknown',
+    isPasswordRecovery: false,
+  }));
 
   const initialCheckDone = useRef(false);
   const authEventHandled = useRef(false);
@@ -183,6 +179,23 @@ export const useAuth = () => {
       loadingTimerRef.current = null;
     }, LOADING_TIMEOUT_MS);
 
+    /** No usable Supabase session: restore a persisted offline login only if
+     *  the network is genuinely unreachable; otherwise show the login page. */
+    const settleWithoutSession = async () => {
+      clearRecoveryTimer();
+      isRecoveringRef.current = false;
+      const offlineRecord = readOfflineSessionRecord();
+      if (offlineRecord) {
+        const reachable = isOnlineRef.current !== false && await checkSupabaseReachable();
+        if (!reachable) {
+          applyOfflineSession(offlineRecord);
+          return;
+        }
+      }
+      applySession(null);
+      setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown' }));
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (!initialCheckDone.current && event === 'INITIAL_SESSION') return;
@@ -220,11 +233,11 @@ export const useAuth = () => {
           return;
         }
         // Offline logins never create a Supabase session, so there is nothing
-        // for refreshSession() to recover — restore the persisted record
-        // instead of dumping the user back on the login screen.
-        const offlineRecord = readOfflineSessionRecord();
-        if (offlineRecord) {
-          applyOfflineSession(offlineRecord);
+        // for refreshSession() to recover. Restore the persisted record only
+        // when the server is unreachable; otherwise fall through to recovery
+        // so we never run as `anon` on a live network.
+        if (readOfflineSessionRecord() && isOnlineRef.current === false) {
+          applyOfflineSession(readOfflineSessionRecord()!);
           return;
         }
         if (isRecoveringRef.current) return;
@@ -236,9 +249,7 @@ export const useAuth = () => {
         recoveryTimerRef.current = setTimeout(() => {
           if (!isRecoveringRef.current) return;
           console.warn('[useAuth] Recovery timed out — clearing session');
-          isRecoveringRef.current = false;
-          applySession(null);
-          setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown' }));
+          void settleWithoutSession();
         }, RECOVERY_TIMEOUT_MS);
 
         // Step 1: try getSession (false alarm / transient storage glitch)
@@ -274,16 +285,12 @@ export const useAuth = () => {
               }, 0);
             } else {
               console.warn('[useAuth] All recovery failed:', error?.message || 'no session');
-              applySession(null);
-              setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown' }));
+              void settleWithoutSession();
             }
           })
           .catch((err) => {
             console.warn('[useAuth] Recovery error:', err);
-            clearRecoveryTimer();
-            isRecoveringRef.current = false;
-            applySession(null);
-            setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown' }));
+            void settleWithoutSession();
           });
       }
     );
@@ -298,7 +305,7 @@ export const useAuth = () => {
 
         if (!session?.user) {
           const offlineRecord = readOfflineSessionRecord();
-          if (offlineRecord) {
+          if (offlineRecord && (isOnlineRef.current === false || !(await checkSupabaseReachable()))) {
             applyOfflineSession(offlineRecord);
             return;
           }
@@ -539,6 +546,19 @@ export const useAuth = () => {
     setAuthState(prev => ({ ...prev, isPasswordRecovery: false }));
   }, []);
 
+  // True while the app is running on a synthetic offline login. Such a session
+  // cannot authenticate Supabase requests, so online sync must be paused and
+  // the user prompted to sign in again.
+  const isOfflineSession = !!authState.session?.access_token?.startsWith('offline-session-');
+
+  /** Drops an offline login without touching account caches or the pending-op
+   *  queue, so unsynced sales survive until the user signs in again. */
+  const exitOfflineSession = useCallback(() => {
+    clearOfflineSession();
+    applySession(null);
+    setAuthState(prev => ({ ...prev, isSuperAdmin: false, role: 'unknown', isPasswordRecovery: false }));
+  }, [applySession]);
+
   /** Safe signOut — never throws, so callers can always navigate after. */
   const signOut = async () => {
     try {
@@ -570,5 +590,7 @@ export const useAuth = () => {
     signInOfflineCashier,
     signOut,
     clearPasswordRecovery,
+    isOfflineSession,
+    exitOfflineSession,
   };
 };

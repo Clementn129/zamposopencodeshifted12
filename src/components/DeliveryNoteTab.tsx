@@ -14,6 +14,11 @@ interface BusinessDetailsExt {
   email?: string | null;
   address?: string | null;
   logoUrl?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBranch?: string | null;
+  bankSwift?: string | null;
 }
 
 interface DeliveryNoteTabProps {

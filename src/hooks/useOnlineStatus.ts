@@ -80,6 +80,10 @@ const stopProbeLoopIfIdle = () => {
   }
 };
 
+/** One-shot reachability check. Used on boot before deciding whether a
+ *  persisted offline login may be restored (see useAuth). */
+export const checkSupabaseReachable = probeOnce;
+
 export const useOnlineStatus = () => {
   const [isOnline, setIsOnline] = useState(onlineState);
 

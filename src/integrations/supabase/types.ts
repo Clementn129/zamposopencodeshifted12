@@ -303,6 +303,11 @@ export type Database = {
           address: string | null
           allow_backdating: boolean
           allow_cart_price_edit: boolean
+          bank_account_name: string | null
+          bank_account_number: string | null
+          bank_branch: string | null
+          bank_name: string | null
+          bank_swift: string | null
           business_type: string
           capex_enabled: boolean
           created_at: string
@@ -338,6 +343,11 @@ export type Database = {
           address?: string | null
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          bank_swift?: string | null
           business_type?: string
           capex_enabled?: boolean
           created_at?: string
@@ -373,6 +383,11 @@ export type Database = {
           address?: string | null
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          bank_swift?: string | null
           business_type?: string
           capex_enabled?: boolean
           created_at?: string
@@ -611,12 +626,14 @@ export type Database = {
           customer_name: string | null
           customer_phone: string | null
           deleted_at: string | null
+          delivered_by: string | null
           delivery_address: string | null
           delivery_note_number: string
           driver_name: string | null
           id: string
           notes: string | null
           quotation_id: string | null
+          received_by: string | null
           status: Database["public"]["Enums"]["delivery_note_status"]
           updated_at: string
         }
@@ -627,12 +644,14 @@ export type Database = {
           customer_name?: string | null
           customer_phone?: string | null
           deleted_at?: string | null
+          delivered_by?: string | null
           delivery_address?: string | null
           delivery_note_number: string
           driver_name?: string | null
           id?: string
           notes?: string | null
           quotation_id?: string | null
+          received_by?: string | null
           status?: Database["public"]["Enums"]["delivery_note_status"]
           updated_at?: string
         }
@@ -643,12 +662,14 @@ export type Database = {
           customer_name?: string | null
           customer_phone?: string | null
           deleted_at?: string | null
+          delivered_by?: string | null
           delivery_address?: string | null
           delivery_note_number?: string
           driver_name?: string | null
           id?: string
           notes?: string | null
           quotation_id?: string | null
+          received_by?: string | null
           status?: Database["public"]["Enums"]["delivery_note_status"]
           updated_at?: string
         }

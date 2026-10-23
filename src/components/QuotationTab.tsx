@@ -15,6 +15,11 @@ interface BusinessDetailsExt {
   address?: string | null;
   logoUrl?: string | null;
   tpin?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBranch?: string | null;
+  bankSwift?: string | null;
   taxMode?: 'none' | 'vat' | 'custom';
   vatRate?: number;
   customTaxName?: string | null;

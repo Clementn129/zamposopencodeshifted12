@@ -8,7 +8,17 @@ import jsPDF from "jspdf";
 interface DeliveryNoteViewProps {
   deliveryNote: DeliveryNote;
   businessName: string;
-  businessDetails: { phone?: string | null; email?: string | null; address?: string | null; logoUrl?: string | null };
+  businessDetails: {
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    logoUrl?: string | null;
+    bankName?: string | null;
+    bankAccountName?: string | null;
+    bankAccountNumber?: string | null;
+    bankBranch?: string | null;
+    bankSwift?: string | null;
+  };
   onBack: () => void;
   onMarkDelivered: (id: string) => void;
   onCreateInvoice?: () => void;
@@ -25,6 +35,13 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
   const items = deliveryNote.items || [];
   const status = statusConfig[deliveryNote.status] || statusConfig.pending;
   const total = items.reduce((s, i) => s + i.lineTotal, 0);
+  const bankRows = [
+    { label: 'Bank', value: businessDetails.bankName },
+    { label: 'Account Name', value: businessDetails.bankAccountName },
+    { label: 'Account Number', value: businessDetails.bankAccountNumber },
+    { label: 'Branch', value: businessDetails.bankBranch },
+    { label: 'SWIFT / Sort Code', value: businessDetails.bankSwift },
+  ].filter((row) => !!row.value);
 
   const loadImageAsBase64 = (url: string): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -194,6 +211,24 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
     doc.text(`K${total.toFixed(2)}`, w - 18, y + 7, { align: "right" });
     y += 18;
 
+    // Payment details
+    if (bankRows.length > 0) {
+      ensureSpace(bankRows.length * 4 + 14);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(80, 80, 80);
+      doc.text("PAYMENT DETAILS", 14, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      bankRows.forEach((row) => {
+        doc.text(`${row.label}: ${row.value}`, 14, y);
+        y += 4;
+      });
+      y += 4;
+    }
+
     // Notes
     if (deliveryNote.notes) {
       doc.setFontSize(8);
@@ -206,6 +241,29 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100, 100, 100);
       doc.text(noteLines, 14, y);
+      y += noteLines.length * 3.5;
+    }
+
+    // Sign-off
+    if (deliveryNote.deliveredBy || deliveryNote.receivedBy) {
+      ensureSpace(20);
+      y += 8;
+      const half = w / 2 + 4;
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(100, 100, 100);
+      doc.text("DELIVERED BY", 14, y);
+      doc.text("RECEIVED BY", half, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(30, 30, 30);
+      doc.text(deliveryNote.deliveredBy || "", 14, y);
+      doc.text(deliveryNote.receivedBy || "", half, y);
+      y += 2;
+      doc.setDrawColor(180, 180, 180);
+      doc.line(14, y, 90, y);
+      doc.line(half, y, w - 14, y);
     }
 
     doc.setFontSize(7);
@@ -305,6 +363,18 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
                 <p className="font-medium">{deliveryNote.carPlate}</p>
               </div>
             )}
+            {deliveryNote.deliveredBy && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><User className="h-3 w-3" /> Delivered By</p>
+                <p className="font-medium">{deliveryNote.deliveredBy}</p>
+              </div>
+            )}
+            {deliveryNote.receivedBy && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><User className="h-3 w-3" /> Received By</p>
+                <p className="font-medium">{deliveryNote.receivedBy}</p>
+              </div>
+            )}
           </div>
 
           {/* Customer & delivery info */}
@@ -360,11 +430,39 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
             </div>
           </div>
 
+          {/* Payment details */}
+          {bankRows.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payment Details</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                {bankRows.map((row) => (
+                  <p key={row.label}>
+                    <span className="text-muted-foreground">{row.label}:</span> {row.value}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Notes */}
           {deliveryNote.notes && (
             <div className="border-t border-border pt-4">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Notes</p>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{deliveryNote.notes}</p>
+            </div>
+          )}
+
+          {/* Sign-off */}
+          {(deliveryNote.deliveredBy || deliveryNote.receivedBy) && (
+            <div className="grid grid-cols-2 gap-8 border-t border-border pt-4">
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Delivered By</p>
+                <p className="text-sm font-medium mt-6 border-b border-dashed border-border pb-1">{deliveryNote.deliveredBy || ""}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Received By</p>
+                <p className="text-sm font-medium mt-6 border-b border-dashed border-border pb-1">{deliveryNote.receivedBy || ""}</p>
+              </div>
             </div>
           )}
         </div>

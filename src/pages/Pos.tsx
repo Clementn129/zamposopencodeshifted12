@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, DollarSign, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Receipt, Boxes, ChefHat, CalendarClock } from "lucide-react";
+import { ArrowLeft, LogOut, Minus, Plus, Search, ShoppingCart, Trash2, Percent, Users, Briefcase, FileText, LayoutGrid, Truck, ReceiptText, Receipt, Boxes, ChefHat, CalendarClock, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -72,7 +72,7 @@ interface ReceiptData {
 const Pos = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, isLoading: authLoading, role, signOut } = useAuthContext();
+  const { user, isLoading: authLoading, role, signOut, isOfflineSession } = useAuthContext();
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } = useBusiness(user?.id);
   const { canBackdate } = useBackdatePermission();
   const { isLocked } = checkSubscriptionStatus();
@@ -117,6 +117,7 @@ const Pos = () => {
   // Discount state
   const [saleDiscountType, setSaleDiscountType] = useState<'percentage' | 'amount' | null>(null);
   const [saleDiscountValue, setSaleDiscountValue] = useState("");
+  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
 
   // Amount received / change calculation
   const [amountReceived, setAmountReceived] = useState("");
@@ -748,7 +749,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       let pushFailed = false;
       let syncNote = "";
 
-      if (isOnline) {
+      if (isOnline && !isOfflineSession) {
         try {
           const { data: rid, error: saleErr } = await (supabase.rpc as any)("sync_offline_sale", {
             p_business_id: business.id,
@@ -783,7 +784,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
       }
 
       if (isCredit) {
-        const canInsertNow = isOnline && !!returnedSaleId && !pushFailed;
+        const canInsertNow = isOnline && !isOfflineSession && !!returnedSaleId && !pushFailed;
         let debtorHandled = false;
         if (canInsertNow) {
           const { error: debtorErr } = await supabase.from("debtors").insert({
@@ -850,7 +851,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
         }
       }
 
-      if (isOnline) {
+      if (isOnline && !isOfflineSession) {
         toast({
           title: paymentMode === "credit" ? "Credit sale recorded" : paymentMode === "partial" ? "Partial sale recorded" : "Sale completed",
           description: pushFailed
@@ -1322,7 +1323,8 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
 
                 <Card className="flex flex-col min-h-0">
                   <CardHeader className="shrink-0"><CardTitle className="text-lg">{isService ? 'Invoice' : 'Cart'}</CardTitle><CardDescription>{isService ? 'Complete transaction' : 'Complete sale'}</CardDescription></CardHeader>
-                  <CardContent className="space-y-3 md:flex-1 md:min-h-0 md:overflow-y-auto">
+                  <CardContent className="flex flex-col gap-3 md:flex-1 md:min-h-0 md:overflow-hidden">
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto max-h-[45vh] md:max-h-none">
                     {cart.length === 0 ? <p className="text-sm text-muted-foreground">{isService ? 'No services added.' : 'Cart empty.'}</p> : cart.map((l) => (
                       <div key={l.lineId} className="bg-secondary rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
@@ -1416,11 +1418,29 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                         )}
                       </div>
                     ))}
+                    </div>
 
                     {cart.length > 0 && (
-                      <>
+                      <div className="shrink-0 space-y-2 border-t pt-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-between"
+                          onClick={() => setMoreOptionsOpen(v => !v)}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            Options — discount, table, customer, credit, back-date
+                            {!moreOptionsOpen && (saleDiscountType || isCredit || (canBackdate && !!saleDate && saleDate < todayLocal())) && (
+                              <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">active</span>
+                            )}
+                          </span>
+                          <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${moreOptionsOpen ? 'rotate-180' : ''}`} />
+                        </Button>
+                        {moreOptionsOpen && (
+                          <div className="max-h-[34vh] space-y-2 overflow-y-auto pr-1 md:max-h-[32vh]">
                         {/* Sale-wide discount */}
-                        <div className="border-t pt-3">
+                        <div className="space-y-2">
                           <Label className="text-sm flex items-center gap-1 mb-2">
                             <Percent className="h-4 w-4" /> Sale Discount
                           </Label>
@@ -1449,7 +1469,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
 
                         {/* Table (restaurant only) */}
                         {isRestaurant && (
-                          <div className="border-t pt-3 space-y-2">
+                          <div className="space-y-2">
                             <Label className="text-sm flex items-center gap-1">
                               <LayoutGrid className="h-4 w-4" /> Table
                             </Label>
@@ -1473,24 +1493,26 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                         )}
 
                         {/* Customer Info (optional - for tax invoice / TPIN) */}
-                        <div className="border-t pt-3 space-y-2">
+                        <div className="space-y-2">
                           <Label className="text-sm">Customer (optional)</Label>
-                          <Input
-                            placeholder="Customer name"
-                            value={customerName}
-                            onChange={(e) => setCustomerName(e.target.value)}
-                          />
-                          <Input
-                            placeholder="Customer TPIN (10 digits)"
-                            inputMode="numeric"
-                            maxLength={10}
-                            value={customerTpin}
-                            onChange={(e) => setCustomerTpin(e.target.value.replace(/\D/g, ''))}
-                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              placeholder="Customer name"
+                              value={customerName}
+                              onChange={(e) => setCustomerName(e.target.value)}
+                            />
+                            <Input
+                              placeholder="Customer TPIN (10 digits)"
+                              inputMode="numeric"
+                              maxLength={10}
+                              value={customerTpin}
+                              onChange={(e) => setCustomerTpin(e.target.value.replace(/\D/g, ''))}
+                            />
+                          </div>
                         </div>
 
                         {/* Payment mode: full / partial / credit */}
-                        <div className="border-t pt-3 space-y-2">
+                        <div className="space-y-2">
                           <Label className="text-sm flex items-center gap-1">
                             <Users className="h-4 w-4" /> Payment Mode
                           </Label>
@@ -1503,53 +1525,52 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                             </SelectContent>
                           </Select>
                           {isCredit && (
-                            <div className="mt-2 space-y-2">
+                            <div className="space-y-2">
                               {!customerName.trim() && (
-                                <p className="text-xs text-destructive">Customer name (above) is required for credit / partial sales.</p>
+                                <p className="text-xs text-destructive">Customer name is required for credit / partial sales.</p>
                               )}
-                              <Input
-                                placeholder="Customer phone"
-                                value={customerPhone}
-                                onChange={(e) => setCustomerPhone(e.target.value)}
-                              />
-                              {paymentMode === "partial" && (
-                                <div>
-                                  <Label className="text-xs">Amount Paid Now (ZMW)</Label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Input
+                                  placeholder="Customer phone"
+                                  value={customerPhone}
+                                  onChange={(e) => setCustomerPhone(e.target.value)}
+                                />
+                                {paymentMode === "partial" && (
                                   <Input
                                     type="number"
                                     inputMode="decimal"
                                     min="0"
                                     max={total}
-                                    placeholder={`0 – ${total.toFixed(2)}`}
+                                    placeholder={`Paid now (max ${total.toFixed(2)})`}
                                     value={partialAmount}
                                     onChange={(e) => setPartialAmount(e.target.value)}
                                   />
-                                </div>
-                              )}
-                              <div>
-                                <Label className="text-xs">Due Date (optional)</Label>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 items-end">
                                 <Input
                                   type="date"
+                                  aria-label="Due date"
                                   value={dueDate}
                                   onChange={(e) => setDueDate(e.target.value)}
                                 />
+                                <p className="text-xs text-muted-foreground pb-2">
+                                  Balance: <strong>ZMW {Math.max(0, total - (paymentMode === "partial" ? Number(partialAmount) || 0 : 0)).toFixed(2)}</strong>
+                                </p>
                               </div>
                               <Textarea
                                 placeholder="Notes (optional)"
                                 value={creditNotes}
                                 onChange={(e) => setCreditNotes(e.target.value)}
-                                className="h-16"
+                                className="h-12"
                               />
-                              <p className="text-xs text-muted-foreground">
-                                Balance owed: <strong>ZMW {Math.max(0, total - (paymentMode === "partial" ? Number(partialAmount) || 0 : 0)).toFixed(2)}</strong>
-                              </p>
                             </div>
                           )}
                         </div>
 
                         {/* Back-dating (opt-in). Never allows a future date. */}
                         {canBackdate && (
-                          <div className="border-t pt-3 space-y-2">
+                          <div className="space-y-2">
                             <Label className="text-sm flex items-center gap-1">
                               <CalendarClock className="h-4 w-4" /> Sale Date
                             </Label>
@@ -1566,13 +1587,12 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                             </p>
                           </div>
                         )}
+                          </div>
+                        )}
 
-                      </>
-                    )}
-
-                    {/* Checkout details stay in the scroll area; the total and
-                        actions below are pinned so they are always reachable. */}
-                    <div className="space-y-1 border-t pt-3">
+                    {/* Totals stay pinned inside the card; payment controls
+                        and actions sit in the bar below. */}
+                    <div className="space-y-1 border-t pt-2">
                       {taxBreakdown && taxBreakdown.taxAmount > 0 ? (
                         <>
                           <div className="flex justify-between text-sm">
@@ -1598,45 +1618,48 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                       )}
                     </div>
 
-                    <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cash">Cash</SelectItem>
-                        <SelectItem value="mobile_money">Mobile Money</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    {/* Amount received & change calculator */}
-                    {paymentMethod === "cash" && cart.length > 0 && (
-                      <div className="border-t pt-3 space-y-2">
-                        <Label className="text-sm flex items-center gap-1">
-                          <DollarSign className="h-4 w-4" /> Amount Received
-                        </Label>
-                        <Input
-                          type="number"
-                          placeholder="Enter amount given by customer"
-                          value={amountReceived}
-                          onChange={(e) => setAmountReceived(e.target.value)}
-                          min="0"
-                        />
-                        {changeDue !== null && (
-                          <div className={`rounded-lg p-3 text-center font-bold text-lg ${changeDue >= 0 ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' : 'bg-destructive/10 text-destructive'}`}>
-                            {changeDue >= 0
-                              ? `Change: ZMW ${changeDue.toFixed(2)}`
-                              : `Short: ZMW ${Math.abs(changeDue).toFixed(2)}`}
-                          </div>
-                        )}
                       </div>
                     )}
 
                   </CardContent>
 
-                  {/* Pinned checkout bar — total + actions stay visible without
-                      scrolling the cart. */}
-                  <div className="shrink-0 space-y-3 border-t bg-card px-6 pb-4 pt-3">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Total</span>
-                      <span className="text-lg font-bold">ZMW {total.toFixed(2)}</span>
+                  {/* Checkout bar — payment, total and actions stay on screen
+                      even while the cart or the page scrolls. */}
+                  <div className="sticky bottom-0 z-20 shrink-0 space-y-2 rounded-b-lg border-t bg-card px-6 pb-4 pt-3 shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.3)]">
+                    {cart.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cash">Cash</SelectItem>
+                            <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {paymentMethod === "cash" ? (
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            placeholder="Amount received"
+                            value={amountReceived}
+                            onChange={(e) => setAmountReceived(e.target.value)}
+                            className="h-9"
+                          />
+                        ) : (
+                          <div />
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-sm text-muted-foreground">Total</span>
+                        <span className="text-lg font-bold">ZMW {total.toFixed(2)}</span>
+                      </div>
+                      {changeDue !== null && (
+                        <span className={`shrink-0 text-sm font-semibold ${changeDue >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                          {changeDue >= 0 ? `Change ${changeDue.toFixed(2)}` : `Short ${Math.abs(changeDue).toFixed(2)}`}
+                        </span>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <Button variant="outline" onClick={clear} disabled={!cart.length || isProcessing}>Clear</Button>
@@ -1660,6 +1683,11 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                   address: business.address,
                   logoUrl: business.logoUrl,
                   tpin: business.tpin,
+                  bankName: business.bankName,
+                  bankAccountName: business.bankAccountName,
+                  bankAccountNumber: business.bankAccountNumber,
+                  bankBranch: business.bankBranch,
+                  bankSwift: business.bankSwift,
                   taxMode: business.taxMode,
                   vatRate: business.vatRate,
                   customTaxName: business.customTaxName,
@@ -1682,6 +1710,11 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                   email: business.email,
                   address: business.address,
                   logoUrl: business.logoUrl,
+                  bankName: business.bankName,
+                  bankAccountName: business.bankAccountName,
+                  bankAccountNumber: business.bankAccountNumber,
+                  bankBranch: business.bankBranch,
+                  bankSwift: business.bankSwift,
                 }}
                 products={activeProducts}
                 quotationId={dnQuotation?.id}
@@ -1706,6 +1739,11 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                   address: business.address,
                   logoUrl: business.logoUrl,
                   tpin: business.tpin,
+                  bankName: business.bankName,
+                  bankAccountName: business.bankAccountName,
+                  bankAccountNumber: business.bankAccountNumber,
+                  bankBranch: business.bankBranch,
+                  bankSwift: business.bankSwift,
                   taxMode: business.taxMode,
                   vatRate: business.vatRate,
                   customTaxName: business.customTaxName,

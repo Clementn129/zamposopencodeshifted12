@@ -378,8 +378,8 @@ const ReceiptModal = ({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-sm w-[calc(100%-2rem)]">
-        <DialogHeader>
+      <DialogContent className="max-w-sm w-[calc(100%-2rem)] flex flex-col max-h-[90dvh] overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center justify-between">
             <span>Receipt</span>
             <Button variant="ghost" size="icon" onClick={onClose}>
@@ -388,7 +388,7 @@ const ReceiptModal = ({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-2 mb-2">
+        <div className="space-y-2 mb-2 shrink-0">
           <Label className="text-xs">Receipt size / paper</Label>
           <Select value={size} onValueChange={(v) => setSize(v as ReceiptSize)}>
             <SelectTrigger className="h-9">
@@ -402,6 +402,7 @@ const ReceiptModal = ({
           </Select>
         </div>
 
+        <div className="flex-1 min-h-0 overflow-y-auto">
         <div
           ref={receiptRef}
           className={`bg-white text-black p-4 rounded-lg ${isA4 ? "font-sans text-sm" : "font-mono text-sm"}`}
@@ -529,6 +530,7 @@ const ReceiptModal = ({
             <p>Powered by Sale Point</p>
           </div>
         </div>
+        </div>
 
         {printError && (
           <p role="alert" className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -536,7 +538,7 @@ const ReceiptModal = ({
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-2 mt-4">
+        <div className="grid grid-cols-2 gap-2 mt-4 shrink-0">
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" /> Save
           </Button>

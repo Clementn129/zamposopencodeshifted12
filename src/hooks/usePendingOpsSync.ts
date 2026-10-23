@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getPendingOps, removePendingOp, updatePendingOpRetry, mergeServerProducts, mergeServerDebtors, mergeServerInvoices, generateOfflineId, getPendingImageUpload, removePendingImageUpload, getPermanentlyFailedOps, resetFailedOps, removeCachedProduct, relinkTempProductId } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useAuthContext } from "@/contexts/AuthContext";
 
 // Maximum number of retries before marking an op as permanently failed
 // Keep in sync with offlineStorage.MAX_RETRIES: a transient outage must not
@@ -75,6 +76,7 @@ const resolveInvoiceId = async (id: string): Promise<string | null> => {
 
 export function usePendingOpsSync(businessId: string | undefined, preventNegativeStock?: boolean) {
   const { isOnline } = useOnlineStatus();
+  const { isOfflineSession } = useAuthContext();
   const [failedOps, setFailedOps] = useState<Array<{
     id: string;
     type: string;
@@ -104,7 +106,9 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
   }, [businessId]);
 
   const runSync = useCallback(async () => {
-    if (!businessId || !isOnline || globalOpsSyncInFlight) return;
+    // Offline logins carry a synthetic token, so every server call would run
+    // as `anon` and fail. Keep the queue intact until the user re-authenticates.
+    if (!businessId || !isOnline || isOfflineSession || globalOpsSyncInFlight) return;
 
     globalOpsSyncInFlight = true;
     try {
@@ -798,13 +802,13 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
       globalOpsSyncInFlight = false;
       void refreshFailedOps();
     }
-  }, [businessId, isOnline, refreshFailedOps, preventNegativeStock]);
+  }, [businessId, isOnline, isOfflineSession, refreshFailedOps, preventNegativeStock]);
 
   // Cross-tab serialization: two windows on the same till must not drain the
   // shared queue at the same time (that duplicates non-idempotent ops). Use
   // the Web Locks API when available, falling back to the in-tab guard.
   const sync = useCallback(async () => {
-    if (!businessId || !isOnline || globalOpsSyncInFlight) return;
+    if (!businessId || !isOnline || isOfflineSession || globalOpsSyncInFlight) return;
     const locks = typeof navigator !== 'undefined' ? (navigator as any).locks : undefined;
     if (locks?.request) {
       try {
@@ -821,7 +825,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
       }
     }
     await runSync();
-  }, [businessId, isOnline, runSync]);
+  }, [businessId, isOnline, isOfflineSession, runSync]);
 
   const retryFailedOps = useCallback(async (opIds: string[]) => {
     if (!businessId || opIds.length === 0) return;
@@ -866,7 +870,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
   }, [refreshFailedOps]);
 
   useEffect(() => {
-    if (!businessId || !isOnline) return;
+    if (!businessId || !isOnline || isOfflineSession) return;
 
     // Initial sync after a short delay to let other syncs settle
     const initialTimer = setTimeout(() => sync(), 5000);
@@ -879,7 +883,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
       clearTimeout(initialTimer);
       clearInterval(interval);
     };
-  }, [businessId, isOnline, sync]);
+  }, [businessId, isOnline, isOfflineSession, sync]);
 
   return { syncNow: sync, failedOps, retryFailedOps, clearFailedOps, refreshFailedOps, lastSyncAt };
 }

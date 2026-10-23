@@ -11,7 +11,18 @@ import jsPDF from "jspdf";
 interface InvoiceViewProps {
   invoice: Invoice;
   businessName: string;
-  businessDetails: { phone?: string | null; email?: string | null; address?: string | null; logoUrl?: string | null; tpin?: string | null };
+  businessDetails: {
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    logoUrl?: string | null;
+    tpin?: string | null;
+    bankName?: string | null;
+    bankAccountName?: string | null;
+    bankAccountNumber?: string | null;
+    bankBranch?: string | null;
+    bankSwift?: string | null;
+  };
   onBack: () => void;
   onEdit: () => void;
   onPay: (paymentMethod: string) => void;
@@ -29,6 +40,13 @@ const InvoiceView = ({ invoice, businessName, businessDetails, onBack, onEdit, o
   const items = invoice.items || [];
   const status = statusConfig[invoice.status] || statusConfig.draft;
   const payable = invoice.status !== 'paid' && invoice.status !== 'void';
+  const bankRows = [
+    { label: 'Bank', value: businessDetails.bankName },
+    { label: 'Account Name', value: businessDetails.bankAccountName },
+    { label: 'Account Number', value: businessDetails.bankAccountNumber },
+    { label: 'Branch', value: businessDetails.bankBranch },
+    { label: 'SWIFT / Sort Code', value: businessDetails.bankSwift },
+  ].filter((row) => !!row.value);
   const [payOpen, setPayOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [voidOpen, setVoidOpen] = useState(false);
@@ -218,6 +236,24 @@ const InvoiceView = ({ invoice, businessName, businessDetails, onBack, onEdit, o
     doc.text("TOTAL", 116, y + 7);
     doc.text(`K${invoice.total.toFixed(2)}`, w - 18, y + 7, { align: "right" });
     y += 18;
+
+    // === PAYMENT DETAILS ===
+    if (bankRows.length > 0) {
+      ensureSpace(bankRows.length * 4 + 14);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(80, 80, 80);
+      doc.text("PAYMENT DETAILS", margin, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      bankRows.forEach((row) => {
+        doc.text(`${row.label}: ${row.value}`, margin, y);
+        y += 4;
+      });
+      y += 4;
+    }
 
     if (invoice.paymentMethod && invoice.status === 'paid') {
       doc.setFontSize(8);
@@ -412,6 +448,19 @@ const InvoiceView = ({ invoice, businessName, businessDetails, onBack, onEdit, o
               </div>
             </div>
           </div>
+
+          {bankRows.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payment Details</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                {bankRows.map((row) => (
+                  <p key={row.label}>
+                    <span className="text-muted-foreground">{row.label}:</span> {row.value}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           {invoice.notes && (
             <div className="border-t border-border pt-4">

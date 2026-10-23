@@ -2,9 +2,11 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getUnsyncedSales, markSaleAsSynced } from "@/lib/offlineStorage";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useAuthContext } from "@/contexts/AuthContext";
 
 export function useSalesSync(businessId: string | undefined) {
   const { isOnline } = useOnlineStatus();
+  const { isOfflineSession } = useAuthContext();
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
@@ -25,7 +27,9 @@ export function useSalesSync(businessId: string | undefined) {
   }, [businessId]);
 
   const sync = useCallback(async () => {
-    if (!businessId || !isOnline || syncInFlight.current) return;
+    // An offline login has no real Supabase session: syncing would hit
+    // PostgREST as `anon` and fail with permission-denied on every retry.
+    if (!businessId || !isOnline || isOfflineSession || syncInFlight.current) return;
 
     syncInFlight.current = true;
     setIsSyncing(true);
@@ -96,14 +100,14 @@ export function useSalesSync(businessId: string | undefined) {
         }
       }
     }
-  }, [businessId, isOnline, checkPendingCount]);
+  }, [businessId, isOnline, isOfflineSession, checkPendingCount]);
 
   useEffect(() => {
     void checkPendingCount();
   }, [checkPendingCount]);
 
   useEffect(() => {
-    if (!businessId || !isOnline) return;
+    if (!businessId || !isOnline || isOfflineSession) return;
 
     void sync();
 
@@ -114,7 +118,7 @@ export function useSalesSync(businessId: string | undefined) {
     return () => {
       clearInterval(interval);
     };
-  }, [businessId, isOnline, sync]);
+  }, [businessId, isOnline, isOfflineSession, sync]);
 
   return { isSyncing, pendingCount, lastSyncError, refetchPending: checkPendingCount, syncNow: sync };
 }

@@ -22,6 +22,8 @@ export interface DeliveryNote {
   deliveryAddress: string | null;
   driverName: string | null;
   carPlate: string | null;
+  deliveredBy: string | null;
+  receivedBy: string | null;
   notes: string | null;
   status: 'pending' | 'delivered' | 'invoiced' | 'completed';
   quotationId: string | null;
@@ -40,6 +42,8 @@ const mapRow = (row: any): DeliveryNote => ({
   deliveryAddress: row.delivery_address,
   driverName: row.driver_name,
   carPlate: row.car_plate,
+  deliveredBy: row.delivered_by ?? null,
+  receivedBy: row.received_by ?? null,
   notes: row.notes,
   status: row.status,
   quotationId: row.quotation_id,
@@ -69,7 +73,7 @@ export function useDeliveryNotes(businessId: string | undefined) {
     try {
       const { data, error } = await supabase
         .from('delivery_notes')
-        .select('id, business_id, delivery_note_number, customer_name, customer_phone, delivery_address, driver_name, car_plate, notes, status, quotation_id, created_at, updated_at, deleted_at')
+        .select('id, business_id, delivery_note_number, customer_name, customer_phone, delivery_address, driver_name, car_plate, delivered_by, received_by, notes, status, quotation_id, created_at, updated_at, deleted_at')
         .eq('business_id', businessId)
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
@@ -125,6 +129,8 @@ export function useDeliveryNotes(businessId: string | undefined) {
             delivery_address: dn.deliveryAddress,
             driver_name: dn.driverName,
             car_plate: dn.carPlate,
+            delivered_by: dn.deliveredBy,
+            received_by: dn.receivedBy,
             notes: dn.notes,
             status: dn.status || 'pending',
             quotation_id: dn.quotationId,
@@ -151,6 +157,8 @@ export function useDeliveryNotes(businessId: string | undefined) {
         delivery_address: dn.deliveryAddress,
         driver_name: dn.driverName,
         car_plate: dn.carPlate,
+        delivered_by: dn.deliveredBy,
+        received_by: dn.receivedBy,
         notes: dn.notes,
         status: dn.status || 'pending',
         quotation_id: dn.quotationId,
