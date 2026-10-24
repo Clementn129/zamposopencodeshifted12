@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+﻿import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { ArrowLeft, CreditCard, MessageCircle, Phone, Copy, Users, CheckCircle2, Zap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import LockScreen from "@/components/LockScreen";
+import OfflineLicencePanel from "@/components/OfflineLicencePanel";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
@@ -165,6 +166,8 @@ const Subscription = () => {
             </CardContent>
           </Card>
 
+          <OfflineLicencePanel />
+
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Renew Subscription</CardTitle>
@@ -172,7 +175,7 @@ const Subscription = () => {
             <CardContent className="space-y-4">
               {isCustom ? (
                 <div className="bg-muted/50 rounded-lg p-6 text-center space-y-3">
-                  <p className="text-sm text-muted-foreground">Custom pricing — contact the admin for your renewal amount.</p>
+                  <p className="text-sm text-muted-foreground">Custom pricing â€” contact the admin for your renewal amount.</p>
                   <div className="bg-secondary rounded-lg p-3 space-y-2">
                     <p className="text-xs text-muted-foreground text-center">
                       Reach out via WhatsApp:
@@ -331,3 +334,4 @@ const Subscription = () => {
 };
 
 export default Subscription;
+

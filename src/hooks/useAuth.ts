@@ -7,6 +7,7 @@ import {
   readOfflineSessionRecord,
   clearOfflineSession,
   clearAccountCaches,
+  getOfflineSessionTtlMs,
   type OfflineSessionRecord,
 } from '@/lib/offlineStorage';
 
@@ -468,11 +469,12 @@ export const useAuth = () => {
         aud: 'authenticated',
         created_at: cached.lastOnlineLogin,
       } as User;
+      const ttlSeconds = Math.floor(getOfflineSessionTtlMs() / 1000);
       const mockSession = {
         access_token: 'offline-session-' + cached.userId,
         refresh_token: 'offline-refresh-' + cached.userId,
-        expires_in: 86400,
-        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        expires_in: ttlSeconds,
+        expires_at: Math.floor(Date.now() / 1000) + ttlSeconds,
         token_type: 'bearer',
         user: mockUser,
       } as Session;
@@ -514,11 +516,12 @@ export const useAuth = () => {
         aud: 'authenticated',
         created_at: cached.lastOnlineLogin,
       } as User;
+      const ttlSeconds = Math.floor(getOfflineSessionTtlMs() / 1000);
       const mockSession = {
         access_token: 'offline-session-' + cached.userId,
         refresh_token: 'offline-refresh-' + cached.userId,
-        expires_in: 86400,
-        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        expires_in: ttlSeconds,
+        expires_at: Math.floor(Date.now() / 1000) + ttlSeconds,
         token_type: 'bearer',
         user: mockUser,
       } as Session;

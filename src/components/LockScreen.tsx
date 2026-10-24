@@ -9,6 +9,7 @@ import { PAYMENT_DETAILS, resolveMonthlyPrice } from '@/lib/paymentDetails';
 import { MonthSelector } from '@/components/MonthSelector';
 import { useLencoRenewal } from '@/hooks/useLencoRenewal';
 import { supabase } from '@/integrations/supabase/client';
+import OfflineLicencePanel from '@/components/OfflineLicencePanel';
 
 interface LockScreenProps {
   paymentCode: string;
@@ -299,6 +300,9 @@ const LockScreen = ({ paymentCode, businessId, daysExpired = 0, onRetrySync, isS
             )}
           </CardContent>
         </Card>
+        <div className="mt-4">
+          <OfflineLicencePanel compact />
+        </div>
       </div>
     </div>
   );

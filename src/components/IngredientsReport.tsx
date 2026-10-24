@@ -38,6 +38,8 @@ const MOVEMENT_LABELS: Record<string, string> = {
   adjustment_add: "Adjustment +",
   adjustment_remove: "Adjustment −",
   manual_edit: "Manual edit",
+  product_create: "Opening stock",
+  opening_correction: "Opening correction",
   other: "Other",
 };
 

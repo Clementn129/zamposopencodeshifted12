@@ -81,6 +81,7 @@ interface OfflineProduct {
   price: number;
   costPrice: number | null;
   stock: number;
+  openingStock?: number;
   minimumStock: number;
   category: string | null;
   barcode?: string | null;
@@ -139,6 +140,8 @@ interface CachedBusiness {
   allowCartPriceEdit?: boolean;
   /** Allow back-dating sales and stock adjustments; absent = off. */
   allowBackdating?: boolean;
+  /** Allow the owner to correct opening stock; absent = off. */
+  allowOpeningStockCorrection?: boolean;
   cachedForUser?: string;
   /** Absent on older caches -> tie-break falls back to store key order. */
   lastUsedAt?: number;
@@ -1106,12 +1109,24 @@ export interface OfflineSessionRecord {
 
 const OFFLINE_SESSION_KEY = 'zampos_offline_session';
 export const OFFLINE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const ELECTRON_OFFLINE_SESSION_TTL_MS = 35 * 24 * 60 * 60 * 1000;
+
+/**
+ * The browser/PWA keeps the 24h server-backed offline window. The desktop app
+ * is licensed offline, so a valid licence allows a much longer local window.
+ */
+export const getOfflineSessionTtlMs = (): number => {
+  if (typeof window !== 'undefined' && (window as unknown as { electronAPI?: unknown }).electronAPI) {
+    return ELECTRON_OFFLINE_SESSION_TTL_MS;
+  }
+  return OFFLINE_SESSION_TTL_MS;
+};
 
 export const persistOfflineSession = (record: Omit<OfflineSessionRecord, 'expiresAt'>): void => {
   try {
     localStorage.setItem(
       OFFLINE_SESSION_KEY,
-      JSON.stringify({ ...record, expiresAt: Date.now() + OFFLINE_SESSION_TTL_MS }),
+      JSON.stringify({ ...record, expiresAt: Date.now() + getOfflineSessionTtlMs() }),
     );
     // Point the per-user session cache (see buildMultiAccountStorage in
     // integrations/supabase/client.ts) at this user, so a real session left
@@ -1250,6 +1265,20 @@ export const cacheOfflineCredentials = async (user: OfflineUser): Promise<void> 
   });
 };
 
+export const verifyPasswordHash = async (password: string, stored: string): Promise<boolean> => {
+  if (typeof stored !== 'string' || !stored) return false;
+  if (stored.startsWith(`${PBKDF2_VERSION}$`)) {
+    const [, iterationsStr, salt, derived] = stored.split('$');
+    if (!salt || !derived) return false;
+    const iterations = Number(iterationsStr) || PBKDF2_ITERATIONS;
+    const candidate = await derivePbkdf2(password, salt, iterations);
+    return timingSafeEqual(candidate, derived);
+  }
+  // Legacy unsalted SHA-256 record (older cached logins only).
+  const legacy = await hashPasswordLegacy(password);
+  return timingSafeEqual(legacy, stored);
+};
+
 export const verifyOfflineCredentials = async (email: string, password: string): Promise<OfflineUser | null> => {
   try {
     const db = await getDB();
@@ -1263,17 +1292,10 @@ export const verifyOfflineCredentials = async (email: string, password: string):
     if (!user || typeof user.passwordHash !== 'string') return null;
 
     const stored = user.passwordHash;
-    if (stored.startsWith(`${PBKDF2_VERSION}$`)) {
-      const [, iterationsStr, salt, derived] = stored.split('$');
-      const iterations = Number(iterationsStr) || PBKDF2_ITERATIONS;
-      const candidate = await derivePbkdf2(password, salt, iterations);
-      return timingSafeEqual(candidate, derived) ? user : null;
-    }
+    if (!(await verifyPasswordHash(password, stored))) return null;
+    if (stored.startsWith(`${PBKDF2_VERSION}$`)) return user;
 
-    // Legacy unsalted SHA-256 record: verify, then transparently upgrade to
-    // PBKDF2 in place so the next login is salted. Never blocks old logins.
-    const legacy = await hashPasswordLegacy(password);
-    if (!timingSafeEqual(legacy, stored)) return null;
+    // Legacy record: transparently upgrade to PBKDF2 after a successful login.
     try {
       const upgraded = { ...user, passwordHash: await hashPassword(password) };
       await cacheOfflineCredentials(upgraded);

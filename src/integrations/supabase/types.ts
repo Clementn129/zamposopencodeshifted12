@@ -303,6 +303,7 @@ export type Database = {
           address: string | null
           allow_backdating: boolean
           allow_cart_price_edit: boolean
+          allow_opening_stock_correction: boolean
           bank_account_name: string | null
           bank_account_number: string | null
           bank_branch: string | null
@@ -343,6 +344,7 @@ export type Database = {
           address?: string | null
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
+          allow_opening_stock_correction?: boolean
           bank_account_name?: string | null
           bank_account_number?: string | null
           bank_branch?: string | null
@@ -383,6 +385,7 @@ export type Database = {
           address?: string | null
           allow_backdating?: boolean
           allow_cart_price_edit?: boolean
+          allow_opening_stock_correction?: boolean
           bank_account_name?: string | null
           bank_account_number?: string | null
           bank_branch?: string | null
@@ -1527,6 +1530,7 @@ export type Database = {
           item_type: string
           minimum_stock: number
           name: string
+          opening_stock: number
           parent_id: string | null
           price: number
           product_type: string
@@ -1552,6 +1556,7 @@ export type Database = {
           item_type?: string
           minimum_stock?: number
           name: string
+          opening_stock?: number
           parent_id?: string | null
           price: number
           product_type?: string
@@ -1577,6 +1582,7 @@ export type Database = {
           item_type?: string
           minimum_stock?: number
           name?: string
+          opening_stock?: number
           parent_id?: string | null
           price?: number
           product_type?: string
@@ -2377,6 +2383,16 @@ export type Database = {
       approve_stock_adjustment: {
         Args: { p_note?: string; p_request_id: string; p_effective_at?: string | null }
         Returns: string
+      }
+      correct_opening_stock: {
+        Args: { p_product_id: string; p_new_opening: number; p_reason?: string | null }
+        Returns: {
+          changed: boolean
+          old_opening: number
+          new_opening: number
+          delta: number
+          current_stock: number
+        }
       }
       cancel_production_order: {
         Args: { p_order_id: string }

@@ -16,6 +16,7 @@ export type Product = {
   price: number;
   costPrice: number | null;
   stock: number;
+  openingStock: number;
   minimumStock: number;
   category: string | null;
   barcode: string | null;
@@ -47,6 +48,7 @@ const mapRowToProduct = (row: ProductRow): Product => ({
   price: Number(row.price),
   costPrice: row.cost_price != null ? Number(row.cost_price) : null,
   stock: Number(row.stock),
+  openingStock: Number(row.opening_stock ?? 0),
   minimumStock: Number(row.minimum_stock ?? 5),
   category: row.category,
   barcode: (row as any).barcode ?? null,
@@ -75,6 +77,7 @@ const mapCachedProduct = (p: CachedProduct): Product => ({
   price: Number(p.price ?? 0),
   costPrice: p.costPrice ?? null,
   stock: Number(p.stock ?? 0),
+  openingStock: Number(p.openingStock ?? 0),
   minimumStock: Number(p.minimumStock ?? 5),
   category: p.category ?? null,
   barcode: (p as any).barcode ?? null,
@@ -260,7 +263,7 @@ export function useProducts(businessId: string | undefined) {
     try {
       let dbQuery = supabase
         .from("products")
-        .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, product_type, is_manufactured, created_at, updated_at", { count: "exact" })
+        .select("id, business_id, name, price, cost_price, stock, opening_stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, product_type, is_manufactured, created_at, updated_at", { count: "exact" })
         .eq("business_id", businessId)
         .eq("is_active", true);
 
@@ -317,7 +320,7 @@ export function useProducts(businessId: string | undefined) {
       try {
         const { data, error: fetchError } = await supabase
           .from("products")
-          .select("id, business_id, name, price, cost_price, stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, product_type, is_manufactured, created_at, updated_at")
+          .select("id, business_id, name, price, cost_price, stock, opening_stock, minimum_stock, category, barcode, track_expiry, track_stock, expiry_date, is_active, tax_category, image_url, parent_id, variant_label, item_type, is_dish, product_type, is_manufactured, created_at, updated_at")
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
           .order("id", { ascending: true })
@@ -343,6 +346,7 @@ export function useProducts(businessId: string | undefined) {
             price: p.price,
             costPrice: p.costPrice,
             stock: p.stock,
+            openingStock: p.openingStock,
             minimumStock: p.minimumStock,
             category: p.category,
             barcode: p.barcode,

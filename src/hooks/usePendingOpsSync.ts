@@ -708,7 +708,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
         try {
           const { data: prodData } = await supabase
             .from('products')
-            .select('id, business_id, created_at, name, price, cost_price, stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, product_type, is_manufactured, expiry_date')
+            .select('id, business_id, created_at, name, price, cost_price, stock, opening_stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, product_type, is_manufactured, expiry_date')
             .eq('business_id', businessId)
             .limit(25000);
           if (prodData) {
@@ -720,6 +720,7 @@ export function usePendingOpsSync(businessId: string | undefined, preventNegativ
               price: Number(p.price),
               costPrice: p.cost_price ? Number(p.cost_price) : null,
               stock: Number(p.stock),
+              openingStock: Number(p.opening_stock ?? 0),
               minimumStock: Number(p.minimum_stock ?? 5),
               category: p.category,
               barcode: p.barcode ?? null,

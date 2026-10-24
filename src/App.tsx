@@ -14,6 +14,7 @@ import RequireManufacturer from "@/components/RequireManufacturer";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PWAUpdatePrompt } from "@/components/PWAUpdatePrompt";
 import { AppSyncManager } from "@/components/AppSyncManager";
+import { ActivationFirstSync } from "@/components/ActivationFirstSync";
 import OfflineSessionNotice from "@/components/OfflineSessionNotice";
 import { AuthLinkHandler } from "@/components/AuthLinkHandler";
 import { seoRoutes, SEO_PATHS } from "./pages/seo/routes";
@@ -27,6 +28,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 // Heavier app pages load on demand to keep the initial bundle small.
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const Activate = lazy(() => import("./pages/Activate"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Pos = lazy(() => import("./pages/Pos"));
 const Products = lazy(() => import("./pages/Products"));
@@ -86,6 +88,7 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
             <Toaster />
             <Sonner />
             <PWAUpdatePrompt />
+            <ActivationFirstSync />
             <BusinessProvider>
               <AppSyncManager>
                 <BrowserRouter>
@@ -96,6 +99,7 @@ const App = forwardRef<HTMLDivElement>((_, ref) => (
                     <Routes>
                       <Route path="/" element={<Index />} />
                       <Route path="/auth" element={<Auth />} />
+                      <Route path="/activate" element={<Activate />} />
                       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                       <Route path="/admin/login" element={<AdminLogin />} />
                       <Route path="/admin-login" element={<AdminLogin />} />

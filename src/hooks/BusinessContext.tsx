@@ -21,6 +21,7 @@ import {
 } from '@/lib/offlineStorage';
 import { useOnlineStatus } from './useOnlineStatus';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { getLicenceStatus, LICENCE_CHANGED_EVENT, type LicenceStatus } from '@/lib/electron';
 import type { Database } from '@/integrations/supabase/types';
 
 type BusinessRow = Database['public']['Tables']['businesses']['Row'];
@@ -60,6 +61,8 @@ export interface Business {
   allowCartPriceEdit: boolean;
   /** Allow staff to back-date sales and stock adjustments. Absent/undefined must be treated as `false`. */
   allowBackdating: boolean;
+  /** Allow the owner to correct a product's opening stock after sales. Absent/undefined = `false`. */
+  allowOpeningStockCorrection: boolean;
 }
 
 export interface BusinessGroupEntry {
@@ -125,6 +128,7 @@ const mapBusinessRow = (row: BusinessRow): Business => ({
   allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
   // Strict `=== true`: back-dating is opt-in and off by default.
   allowBackdating: (row as unknown as Record<string, unknown>).allow_backdating === true,
+  allowOpeningStockCorrection: (row as unknown as Record<string, unknown>).allow_opening_stock_correction === true,
 });
 
 const isElectronBiz = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
@@ -148,6 +152,25 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
   // this id and re-loads the matching row. Always lands on the root (head office).
   const rootBusinessIdRef = useRef<string | null>(null);
   const [rootBusinessId, setRootBusinessId] = useState<string | null>(null);
+  const [licence, setLicence] = useState<LicenceStatus | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    const load = async () => {
+      const next = await getLicenceStatus();
+      if (!cancelled) setLicence(next);
+    };
+    void load();
+    const onChange = () => void load();
+    window.addEventListener(LICENCE_CHANGED_EVENT, onChange);
+    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(LICENCE_CHANGED_EVENT, onChange);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const clearLoadingTimer = useCallback(() => {
     if (loadingTimerRef.current) {
@@ -207,6 +230,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       capexEnabled: (row as unknown as Record<string, unknown>).capex_enabled === true,
       allowCartPriceEdit: (row as unknown as Record<string, unknown>).allow_cart_price_edit === true,
       allowBackdating: (row as unknown as Record<string, unknown>).allow_backdating === true,
+      allowOpeningStockCorrection: (row as unknown as Record<string, unknown>).allow_opening_stock_correction === true,
     }, user?.id);
   }, [user?.id]);
 
@@ -258,6 +282,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
         capexEnabled: cachedBiz.capexEnabled === true,
         allowCartPriceEdit: cachedBiz.allowCartPriceEdit === true,
         allowBackdating: cachedBiz.allowBackdating === true,
+        allowOpeningStockCorrection: cachedBiz.allowOpeningStockCorrection === true,
       });
       // A cached row is real, paintable business state: stop gating pages on
       // the network waterfall while fetchAll reconciles with the server.
@@ -293,6 +318,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       capexEnabled: false,
       allowCartPriceEdit: false,
       allowBackdating: false,
+      allowOpeningStockCorrection: false,
     });
     setIsLoading(false);
     clearLoadingTimer();
@@ -533,6 +559,29 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     if (!business) {
       return { isExpired: false, isLocked: false, daysRemaining: 0 };
     }
+
+    // A signed offline licence is authoritative for the desktop app. It covers
+    // the root business and its branches; the browser/PWA never has one.
+    const licenceCoversBusiness =
+      !!licence?.valid &&
+      (!licence.businessId ||
+        licence.businessId === business.id ||
+        (!!rootBusinessId && licence.businessId === rootBusinessId));
+    if (licenceCoversBusiness) {
+      const now = getAdjustedTime();
+      const licenceExpiry = licence.expiresAt ? new Date(licence.expiresAt) : null;
+      const serverExpiry = business.subscriptionExpiresAt;
+      const bestExpiry = Math.max(
+        licenceExpiry && !isNaN(licenceExpiry.getTime()) ? licenceExpiry.getTime() : 0,
+        serverExpiry && !isNaN(serverExpiry.getTime()) ? serverExpiry.getTime() : 0,
+      );
+      if (bestExpiry > 0 && !isNaN(now.getTime())) {
+        const isExpired = now.getTime() >= bestExpiry;
+        const daysRemaining = Math.max(0, Math.ceil((bestExpiry - now.getTime()) / (1000 * 60 * 60 * 24)));
+        return { isExpired, isLocked: isExpired, daysRemaining };
+      }
+    }
+
     if (isOfflineTooLong(35)) {
       return { isExpired: true, isLocked: true, daysRemaining: 0 };
     }
@@ -548,7 +597,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
       isLocked: business.isLocked || isExpired,
       daysRemaining,
     };
-  }, [business]);
+  }, [business, licence, rootBusinessId]);
 
   // Instant first paint: hydrate the last-used business from IndexedDB as
   // soon as auth resolves, so route guards/pages don't sit behind fetchAll's

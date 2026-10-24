@@ -13,6 +13,7 @@ import { Store, Mail, Lock, User, Building2, Loader2, Phone, MapPin, ArrowLeft, 
 import { validateAffiliateCode } from '@/hooks/useAffiliate';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { isElectron } from '@/lib/electron';
 
 // Supabase auth errors don't always carry a plain string on `.message` — the
 // client can surface an object (or nothing at all) when the request fails below
@@ -956,6 +957,17 @@ const Auth = () => {
                     )}
                   </Button>
                 </form>
+
+                {isElectron() && (
+                  <div className="mt-4 text-center">
+                    <Link
+                      to="/activate"
+                      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                    >
+                      Activate this PC for offline use
+                    </Link>
+                  </div>
+                )}
 
               </TabsContent>
 

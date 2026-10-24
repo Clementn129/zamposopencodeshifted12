@@ -6,8 +6,8 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  // Use relative base for Electron (file://) builds: ELECTRON=1 npm run build
-  base: process.env.ELECTRON === "1" ? "./" : "/",
+  // Absolute base: the desktop shell serves the app from app://bundle/.
+  base: "/",
   esbuild: mode === "production"
     ? { pure: ["console.log", "console.debug", "console.info"] }
     : undefined,
@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      injectRegister: false,
       devOptions: { enabled: false },
       includeAssets: ["favicon.ico", "icon-192.png", "icon-512.png"],
       manifest: {

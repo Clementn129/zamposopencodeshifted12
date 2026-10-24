@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock, Factory, Landmark } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Save, Loader2, Store, Briefcase, Upload, X, Image, Receipt, Hash, Utensils, Archive, Printer, Package, HardHat, Tag, CalendarClock, Factory, Landmark, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -79,6 +79,8 @@ const Settings = () => {
   const [allowCartPriceEditSaving, setAllowCartPriceEditSaving] = useState(false);
   const [allowBackdating, setAllowBackdating] = useState(false);
   const [allowBackdatingSaving, setAllowBackdatingSaving] = useState(false);
+  const [allowOpeningStockCorrection, setAllowOpeningStockCorrection] = useState(false);
+  const [allowOpeningStockCorrectionSaving, setAllowOpeningStockCorrectionSaving] = useState(false);
 
   const handleDrawerPinChange = (value: string) => {
     const pin = value === '5' ? 5 : 2;
@@ -269,6 +271,48 @@ const Settings = () => {
     }
   };
 
+  const handleOpeningStockCorrectionChange = async (enabled: boolean) => {
+    if (!business?.id) return;
+    const previous = allowOpeningStockCorrection;
+    setAllowOpeningStockCorrection(enabled);
+    setAllowOpeningStockCorrectionSaving(true);
+    const updates = {
+      allow_opening_stock_correction: enabled,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      if (!isOnline) {
+        await queuePendingOp({
+          id: generateOfflineId(),
+          businessId: business.id,
+          type: 'settings_update',
+          payload: { updates },
+          createdAt: new Date().toISOString(),
+        });
+        toast({ title: 'Saved offline', description: 'The opening-stock setting will sync when connected.' });
+        return;
+      }
+      const { error } = await supabase.from('businesses').update(updates).eq('id', business.id);
+      if (error) throw error;
+      toast({
+        title: enabled ? 'Opening-stock correction on' : 'Opening-stock correction off',
+        description: enabled
+          ? 'Owners can correct a product opening quantity after sales, with a full audit trail.'
+          : 'The opening-stock correction action is hidden.',
+      });
+      await refetch();
+    } catch (e) {
+      setAllowOpeningStockCorrection(previous);
+      toast({
+        variant: 'destructive',
+        title: 'Failed',
+        description: e instanceof Error ? e.message : 'Could not save this setting',
+      });
+    } finally {
+      setAllowOpeningStockCorrectionSaving(false);
+    }
+  };
+
   const handleBusinessTypeChange = async (value: BusinessType) => {
     setBusinessType(value);
     if (!business?.id || !isOnline) return;
@@ -319,6 +363,7 @@ const Settings = () => {
       setCapexEnabled(business.capexEnabled === true);
       setAllowCartPriceEdit(business.allowCartPriceEdit === true);
       setAllowBackdating(business.allowBackdating === true);
+      setAllowOpeningStockCorrection(business.allowOpeningStockCorrection === true);
     }
   }, [business]);
 
@@ -920,6 +965,39 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground">
                 On by default for every business. Turn it off only if you deliberately sell items
                 you have not received yet.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Opening stock correction */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><History className="h-5 w-5" /> Opening stock correction</CardTitle>
+              <CardDescription>
+                Lets the owner fix a product's original opening quantity after sales have already been recorded.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-secondary p-3">
+                <div>
+                  <Label htmlFor="allow-opening-stock-correction">Allow opening-stock corrections</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {allowOpeningStockCorrection
+                      ? 'ON — owners can correct opening stock from the product edit dialog.'
+                      : 'OFF — the correction action is hidden.'}
+                  </p>
+                </div>
+                <Switch
+                  id="allow-opening-stock-correction"
+                  checked={allowOpeningStockCorrection}
+                  disabled={allowOpeningStockCorrectionSaving}
+                  onCheckedChange={handleOpeningStockCorrectionChange}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Off by default. A correction restates past opening stock and records an auditable
+                opening-correction movement. If the new opening is lower than the quantity already
+                sold or moved, the correction is blocked so stock can never go negative.
               </p>
             </CardContent>
           </Card>

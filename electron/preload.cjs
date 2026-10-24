@@ -13,6 +13,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onUpdateDownloaded: (callback) => {
     ipcRenderer.on("update-downloaded", () => callback());
   },
+  checkForUpdates: () => ipcRenderer.invoke("update-check"),
+  dataDir: {
+    get: () => ipcRenderer.invoke("data-dir-get"),
+    open: () => ipcRenderer.invoke("data-dir-open"),
+  },
+  activation: {
+    unseal: (buffer, pin) => ipcRenderer.invoke("activation-unseal", buffer, pin),
+    commit: (buffer, pin, password) => ipcRenderer.invoke("activation-commit", buffer, pin, password),
+  },
+  licence: {
+    status: () => ipcRenderer.invoke("licence-status"),
+    current: () => ipcRenderer.invoke("licence-token"),
+    import: (token) => ipcRenderer.invoke("licence-import", token),
+  },
+  secrets: {
+    get: () => ipcRenderer.invoke("activation-secret-get"),
+    clear: () => ipcRenderer.invoke("activation-secret-clear"),
+  },
 });
 
 contextBridge.exposeInMainWorld("Android", {
@@ -26,7 +44,7 @@ contextBridge.exposeInMainWorld("Android", {
     return ipcRenderer.sendSync("printer-connect-tcp", host, port);
   },
   disconnect: () => {
-    ipcRenderer.sendSync("printer-disconnect");
+    return ipcRenderer.sendSync("printer-disconnect");
   },
   isConnected: () => {
     return ipcRenderer.sendSync("printer-is-connected");
@@ -65,7 +83,7 @@ contextBridge.exposeInMainWorld("Android", {
     return ipcRenderer.sendSync("printer-get-connection-type");
   },
   setConnectionType: (type) => {
-    ipcRenderer.sendSync("printer-set-connection-type", type);
+    return ipcRenderer.sendSync("printer-set-connection-type", type);
   },
   openAppSettings: () => {},
 });

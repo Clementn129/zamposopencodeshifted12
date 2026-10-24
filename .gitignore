@@ -31,7 +31,15 @@ cloudflare desktop app rebuild/
 cloudflare desktop app and android app rebuild/
 *.exe
 
+# Offline installer secrets and client delivery artefacts (never commit)
+scripts/.secrets/
+Farm Front Offline Installer/
+*.spact
+*.splic
+licence-private.pem
+
 # Generated files
+fb-posts-backup-*.json
 supabase/migrations_all.sql
 supabase/.temp/
 *.tsbuildinfo

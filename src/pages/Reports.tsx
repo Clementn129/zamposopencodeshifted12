@@ -76,6 +76,7 @@ const MOVEMENT_LABELS: Record<string, string> = {
   import: "Import",
   variant_create: "Variant created",
   product_create: "Opening stock",
+  opening_correction: "Opening correction",
   restoration: "Restored",
   other: "Other",
 };
@@ -370,7 +371,7 @@ const Reports = () => {
         const events: ItemEvent[] = [];
         // Sale/manual deductions are represented by the sales lines below, so
         // only non-sale outs are taken from the ledger to avoid double counting.
-        const ledgerOutTypes = new Set(["adjustment_remove", "delivery_note"]);
+        const ledgerOutTypes = new Set(["adjustment_remove", "delivery_note", "opening_correction"]);
         // Opening/closing balances come from the ledger: with a complete ledger,
         // stock_before(from) = current - sum(delta where ts >= from). We keep the
         // sum of deltas at/after each boundary to derive both edges exactly.

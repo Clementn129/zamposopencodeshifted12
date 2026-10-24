@@ -20,6 +20,7 @@ import {
   Boxes,
   ChefHat,
   CalendarClock,
+  History,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ import { type ProductType, PRODUCT_TYPE_LABELS } from "@/lib/manufacturing";
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { useCashierPermissions } from "@/hooks/useCashierPermissions";
 import { useBackdatePermission } from "@/hooks/useBackdatePermission";
+import { previewOpeningCorrection } from "@/lib/openingStock";
 import { supabase } from "@/integrations/supabase/client";
 import {
   saveOfflineStockUpdate,
@@ -132,6 +134,10 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
   const [stockAdjustment, setStockAdjustment] = useState("");
   const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
   const [adjustDate, setAdjustDate] = useState(() => todayLocal());
+  const [openingCorrectionOpen, setOpeningCorrectionOpen] = useState(false);
+  const [openingCorrectionValue, setOpeningCorrectionValue] = useState("");
+  const [openingCorrectionReason, setOpeningCorrectionReason] = useState("");
+  const [openingCorrectionSaving, setOpeningCorrectionSaving] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -296,6 +302,22 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setIsManufactured(!!(p as unknown as { isManufactured?: boolean }).isManufactured);
     setOpen(true);
   };
+
+  const canCorrectOpeningStock =
+    (role === "owner" || role === "super_admin") && business?.allowOpeningStockCorrection === true;
+
+  const openingCorrectionPreview = useMemo(
+    () =>
+      previewOpeningCorrection({
+        openingStock: editing?.openingStock ?? 0,
+        currentStock: editing?.stock ?? 0,
+        newOpening:
+          openingCorrectionValue.trim() === ""
+            ? Number.NaN
+            : Number(openingCorrectionValue),
+      }),
+    [editing, openingCorrectionValue],
+  );
 
   const [syncingCost, setSyncingCost] = useState(false);
 
@@ -546,6 +568,7 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
             price: payload.price,
             costPrice: payload.cost_price,
             stock: payload.stock,
+            openingStock: payload.stock,
             minimumStock: payload.minimum_stock,
             category: payload.category,
             isActive: true,
@@ -652,6 +675,85 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
     setAdjustmentType("add");
     setAdjustDate(todayLocal());
     setStockAdjustOpen(true);
+  };
+
+  const openOpeningCorrection = () => {
+    if (!editing) return;
+    setOpeningCorrectionValue(String(editing.openingStock ?? 0));
+    setOpeningCorrectionReason("");
+    setOpeningCorrectionOpen(true);
+  };
+
+  const correctOpeningStock = async () => {
+    if (!editing || !business) return;
+    if (!isOnline) {
+      toast({
+        variant: "destructive",
+        title: "Connect to correct opening stock",
+        description: "Opening-stock corrections are applied online only so the ledger can be restated safely.",
+      });
+      return;
+    }
+    if (!openingCorrectionPreview.valid) {
+      toast({
+        variant: "destructive",
+        title: "Cannot correct opening stock",
+        description: openingCorrectionPreview.error ?? "Check the opening quantity.",
+      });
+      return;
+    }
+
+    setOpeningCorrectionSaving(true);
+    try {
+      const { data, error } = await supabase.rpc("correct_opening_stock", {
+        p_product_id: editing.id,
+        p_new_opening: openingCorrectionPreview.newOpening,
+        p_reason: openingCorrectionReason.trim() || null,
+      });
+      if (error) throw error;
+
+      const result = data as {
+        old_opening?: number;
+        new_opening?: number;
+        current_stock?: number;
+      } | null;
+      const oldOpening = Number(result?.old_opening ?? openingCorrectionPreview.oldOpening);
+      const newOpening = Number(result?.new_opening ?? openingCorrectionPreview.newOpening);
+      const newStock = Number(result?.current_stock ?? openingCorrectionPreview.newCurrentStock);
+      const oldStock = openingCorrectionPreview.currentStock;
+
+      const cached = await getCachedProducts(business.id);
+      const idx = cached.findIndex((p) => p.id === editing.id);
+      if (idx >= 0) {
+        cached[idx] = {
+          ...cached[idx],
+          stock: newStock,
+          openingStock: newOpening,
+        };
+        await cacheProducts(cached);
+      }
+
+      setEditing((prev) =>
+        prev
+          ? { ...prev, stock: newStock, openingStock: newOpening }
+          : prev,
+      );
+      setStock(String(newStock));
+      setOpeningCorrectionOpen(false);
+      toast({
+        title: "Opening stock corrected",
+        description: `${editing.name}: opening ${oldOpening} → ${newOpening}. Current stock ${oldStock} → ${newStock}.`,
+      });
+      await refetch();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not correct opening stock",
+        description: e instanceof Error ? e.message : "The correction was not saved.",
+      });
+    } finally {
+      setOpeningCorrectionSaving(false);
+    }
   };
 
   const adjustStock = async () => {
@@ -1573,7 +1675,11 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
             {labels.showStock && itemType !== "service" && (!editing || !(variantsByParent[editing.id]?.length)) && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>{labels.stockLabel}</Label>
+                  <Label>
+                    {business?.allowOpeningStockCorrection && editing
+                      ? "Current stock"
+                      : labels.stockLabel}
+                  </Label>
                   <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} />
                 </div>
                 <div className="space-y-2">
@@ -1585,6 +1691,32 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
                     placeholder="5"
                   />
                 </div>
+              </div>
+            )}
+
+            {canCorrectOpeningStock && editing && (
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Opening stock</p>
+                    <p className="text-xs text-muted-foreground">
+                      Originally recorded: {editing.openingStock ?? 0}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={openOpeningCorrection}
+                  >
+                    <History className="h-4 w-4 mr-2" />
+                    Correct opening stock
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Correct this only if the original quantity was entered wrongly. It restates
+                  past reports and adjusts current stock by the same difference.
+                </p>
               </div>
             )}
 
@@ -1840,6 +1972,96 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Opening Stock Correction Dialog */}
+      <Dialog open={openingCorrectionOpen} onOpenChange={setOpeningCorrectionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Correct Opening Stock</DialogTitle>
+            <DialogDescription>
+              {editing?.name}
+              {editing?.variantLabel ? ` · ${editing.variantLabel}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 text-sm">
+              <div>
+                <p className="text-muted-foreground">Opening stock</p>
+                <p className="font-medium">{openingCorrectionPreview.oldOpening}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Current stock</p>
+                <p className="font-medium">{openingCorrectionPreview.currentStock}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-muted-foreground">
+                  {openingCorrectionPreview.soldOrMoved >= 0
+                    ? "Net sold or moved since opening"
+                    : "Net stock added since opening"}
+                </p>
+                <p className="font-medium">
+                  {Math.abs(openingCorrectionPreview.soldOrMoved)}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>New opening stock</Label>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                value={openingCorrectionValue}
+                onChange={(e) => setOpeningCorrectionValue(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Reason (optional)</Label>
+              <Input
+                value={openingCorrectionReason}
+                onChange={(e) => setOpeningCorrectionReason(e.target.value)}
+                placeholder="e.g. supplier count was entered incorrectly"
+              />
+            </div>
+
+            <div className="rounded-lg border p-3 text-sm">
+              <span className="text-muted-foreground">Current stock after correction: </span>
+              <span className="font-medium">{openingCorrectionPreview.newCurrentStock}</span>
+              {openingCorrectionPreview.delta !== 0 && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({openingCorrectionPreview.delta > 0 ? "+" : ""}
+                  {openingCorrectionPreview.delta})
+                </span>
+              )}
+            </div>
+
+            {openingCorrectionPreview.error && (
+              <p className="text-sm text-destructive">{openingCorrectionPreview.error}</p>
+            )}
+            {!isOnline && (
+              <p className="text-sm text-muted-foreground">
+                Connect to the internet to apply an opening-stock correction.
+              </p>
+            )}
+
+            <Button
+              variant="pos-accent"
+              className="w-full"
+              onClick={correctOpeningStock}
+              disabled={
+                openingCorrectionSaving ||
+                !isOnline ||
+                !openingCorrectionPreview.valid ||
+                openingCorrectionPreview.delta === 0
+              }
+            >
+              {openingCorrectionSaving ? "Saving…" : "Apply correction"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stock Adjustment Dialog */}
       <Dialog open={stockAdjustOpen} onOpenChange={setStockAdjustOpen}>
