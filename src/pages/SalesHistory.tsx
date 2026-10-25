@@ -857,7 +857,7 @@ const SalesHistory = () => {
           const itemCost = costPrice * (Number(item.quantity) || 0);
           return (
             <div key={idx} className="flex justify-between gap-3">
-              <span>{item.quantity}× {item.name}</span>
+              <span className="truncate">{item.quantity}× {item.name}</span>
               <span className="flex gap-3 shrink-0">
                 {costPrice > 0 && (
                   <span className="text-muted-foreground">
