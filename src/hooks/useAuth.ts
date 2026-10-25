@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useOnlineStatus, checkSupabaseReachable } from '@/hooks/useOnlineStatus';
+import { syncServerTime, getServerTime, isTimeDriftSignificant } from '@/lib/timeSync';
 import {
   persistOfflineSession,
   readOfflineSessionRecord,
@@ -10,6 +11,7 @@ import {
   getOfflineSessionTtlMs,
   type OfflineSessionRecord,
 } from '@/lib/offlineStorage';
+
 
 const isElectron = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Electron');
 const LOADING_TIMEOUT_MS = isElectron ? 3_000 : 15_000;
@@ -35,7 +37,7 @@ const buildOfflineSession = (record: OfflineSessionRecord): Session => {
   return {
     access_token: 'offline-session-' + record.userId,
     refresh_token: 'offline-refresh-' + record.userId,
-    expires_in: Math.max(60, Math.round((record.expiresAt - Date.now()) / 1000)),
+    expires_in: Math.max(60, Math.round((record.expiresAt - getServerTime()) / 1000)),
     expires_at: Math.floor(record.expiresAt / 1000),
     token_type: 'bearer',
     user: mockUser,
@@ -172,6 +174,9 @@ export const useAuth = () => {
   }, [clearRecoveryTimer]);
 
   useEffect(() => {
+    // Sync server time on mount to compensate for clock drift
+    void syncServerTime();
+
     loadingTimerRef.current = setTimeout(() => {
       if (authState.isLoading) {
         console.warn('[useAuth] Auth loading timed out — forcing ready state');
