@@ -1152,39 +1152,63 @@ const canAdjustStockHere = !isCashier || canAdjustStock;
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void importCsv(f);
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportCsv}
-                disabled={products.length === 0}
-                aria-label="Export CSV"
-                title="Export all items to CSV"
-              >
-                <Download className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Export</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!isOnline || importing}
-                aria-label="Import CSV"
-                title="Import items from CSV"
-              >
-                <Upload className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">{importing ? "Importing…" : "Import"}</span>
-              </Button>
+               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                 <div className="flex items-center gap-2 mr-2">
+                   <Select 
+                     value={exportCategory} 
+                     onValueChange={setExportCategory}
+                     className="h-8 w-[120px] text-xs"
+                   >
+                     <SelectTrigger>
+                       <SelectValue placeholder="All categories" />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="all">All Categories</SelectItem>
+                       <SelectItem value="__uncategorized__">Uncategorized</SelectItem>
+                       {categories.map(c => (
+                         <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                       ))}
+                     </SelectContent>
+                   </Select>
+                 </div>
+                 <input
+                   ref={fileInputRef}
+                   type="file"
+                   accept=".csv,text/csv"
+                   className="hidden"
+                   onChange={(e) => {
+                     const f = e.target.files?.[0];
+                     if (f) void importCsv(f);
+                   }}
+                 />
+
+               <Button
+                 variant="outline"
+                 size="sm"
+                 onClick={() => {
+                   // Use current category filter or 'all'
+                   exportCsv();
+                 }}
+                 disabled={products.length === 0}
+                 aria-label="Export CSV"
+                 title="Export filtered items to CSV"
+               >
+                 <Download className="h-4 w-4 sm:mr-2" />
+                 <span className="hidden sm:inline">Export</span>
+               </Button>
+
+               <Button
+                 variant="outline"
+                 size="sm"
+                 onClick={exportCsv}
+                 disabled={products.length === 0}
+                 aria-label="Export CSV"
+                 title={exportCategory === 'all' ? "Export all items to CSV" : `Export ${exportCategory} items to CSV`}
+               >
+                 <Download className="h-4 w-4 sm:mr-2" />
+                 <span className="hidden sm:inline">Export</span>
+               </Button>
+
               <Button
                 variant="ghost"
                 size="sm"

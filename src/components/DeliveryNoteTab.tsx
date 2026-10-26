@@ -5,6 +5,8 @@ import { Product } from "@/hooks/useProducts";
 import DeliveryNoteList from "./DeliveryNoteList";
 import DeliveryNoteForm from "./DeliveryNoteForm";
 import DeliveryNoteView from "./DeliveryNoteView";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 type View = 'list' | 'new' | 'view';
@@ -38,6 +40,7 @@ const DeliveryNoteTab = ({ businessId, businessName, businessDetails, products, 
   const { deliveryNotes, isLoading, createDeliveryNote, updateDeliveryNoteStatus, softDeleteDeliveryNote, getDeliveryNoteWithItems } = useDeliveryNotes(businessId);
   const [view, setView] = useState<View>('list');
   const [activeNote, setActiveNote] = useState<DeliveryNote | null>(null);
+  const [hidePrices, setHidePrices] = useState(false);
 
   // When a quotation is selected in POS, jump straight to the new delivery-note
   // form with the quotation items prefilled.
@@ -113,14 +116,28 @@ const DeliveryNoteTab = ({ businessId, businessName, businessDetails, products, 
       )}
 
       {view === 'view' && activeNote && (
-        <DeliveryNoteView
-          deliveryNote={activeNote}
-          businessName={businessName}
-          businessDetails={businessDetails}
-          onBack={() => setView('list')}
-          onMarkDelivered={handleMarkDelivered}
-          onCreateInvoice={onCreateInvoice ? () => onCreateInvoice(activeNote.id) : undefined}
-        />
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-muted/50 p-2 rounded-lg border border-border">
+            <div className="flex items-center gap-2">
+              <Switch 
+                id="hide-prices" 
+                checked={hidePrices} 
+                onCheckedChange={setHidePrices} 
+              />
+              <Label htmlFor="hide-prices" className="text-xs font-medium">Hide Prices on PDF/Print</Label>
+            </div>
+            <p className="text-[10px] text-muted-foreground">Toggles prices in the preview and exported document</p>
+          </div>
+          <DeliveryNoteView
+            deliveryNote={activeNote}
+            businessName={businessName}
+            businessDetails={businessDetails}
+            onBack={() => setView('list')}
+            onMarkDelivered={handleMarkDelivered}
+            onCreateInvoice={onCreateInvoice ? () => onCreateInvoice(activeNote.id) : undefined}
+            hidePrices={hidePrices}
+          />
+        </div>
       )}
     </>
   );

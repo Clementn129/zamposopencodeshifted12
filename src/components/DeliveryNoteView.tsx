@@ -22,6 +22,7 @@ interface DeliveryNoteViewProps {
   onBack: () => void;
   onMarkDelivered: (id: string) => void;
   onCreateInvoice?: () => void;
+  hidePrices?: boolean;
 }
 
 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -31,7 +32,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   invoiced: { label: 'Invoiced', className: 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400' },
 };
 
-const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack, onMarkDelivered, onCreateInvoice }: DeliveryNoteViewProps) => {
+const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack, onMarkDelivered, onCreateInvoice, hidePrices = false }: DeliveryNoteViewProps) => {
   const items = deliveryNote.items || [];
   const status = statusConfig[deliveryNote.status] || statusConfig.pending;
   const total = items.reduce((s, i) => s + i.lineTotal, 0);
@@ -82,6 +83,11 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
     };
 
     drawAccentBar();
+
+    if (hidePrices) {
+      // we should probably not draw the accent bar on the first page if we are adjusting logic,
+      // but let's keep it consistent.
+    }
 
     if (businessDetails.logoUrl) {
       const base64 = await loadImageAsBase64(businessDetails.logoUrl);
@@ -174,8 +180,10 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
     doc.setTextColor(255, 255, 255);
     doc.text("ITEM", 18, y + 6);
     doc.text("QTY", 120, y + 6);
-    doc.text("PRICE", 138, y + 6);
-    doc.text("TOTAL", w - 18, y + 6, { align: "right" });
+    if (!hidePrices) {
+      doc.text("PRICE", 138, y + 6);
+      doc.text("TOTAL", w - 18, y + 6, { align: "right" });
+    }
     y += 12;
 
     doc.setTextColor(30, 30, 30);
@@ -189,27 +197,35 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
       doc.setFontSize(8.5);
       doc.text(item.productName.substring(0, 40), 18, y);
       doc.text(item.quantity.toString(), 123, y);
-      doc.text(`K${item.unitPrice.toFixed(2)}`, 138, y);
-      doc.setFont("helvetica", "bold");
-      doc.text(`K${item.lineTotal.toFixed(2)}`, w - 18, y, { align: "right" });
+      if (!hidePrices) {
+        doc.text(`K${item.unitPrice.toFixed(2)}`, 138, y);
+        doc.setFont("helvetica", "bold");
+        doc.text(`K${item.lineTotal.toFixed(2)}`, w - 18, y, { align: "right" });
+      }
       y += 8;
     });
 
     ensureSpace(20);
     y += 4;
 
-    // Total
-    doc.setDrawColor(230, 230, 230);
-    doc.line(120, y, w - 14, y);
-    y += 6;
-    doc.setFillColor(34, 197, 94);
-    doc.roundedRect(120, y - 1, w - 134, 12, 2, 2, 'F');
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(255, 255, 255);
-    doc.text("TOTAL", 126, y + 7);
-    doc.text(`K${total.toFixed(2)}`, w - 18, y + 7, { align: "right" });
-    y += 18;
+    if (!hidePrices) {
+      // Total
+      doc.setDrawColor(230, 230, 230);
+      doc.line(120, y, w - 14, y);
+      y += 6;
+      doc.setFillColor(34, 197, 94);
+      doc.roundedRect(120, y - 1, w - 134, 12, 2, 2, 'F');
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(255, 255, 255);
+      doc.text("TOTAL", 126, y + 7);
+      doc.text(`K${total.toFixed(2)}`, w - 18, y + 7, { align: "right" });
+      y += 18;
+    } else {
+      y += 10;
+    }
+
+    // Payment details
 
     // Payment details
     if (bankRows.length > 0) {
@@ -280,11 +296,18 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
 
   const handlePrint = async () => {
     const doc = await generatePDF();
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    const printWindow = window.open(url);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => { printWindow.print(); });
+    // For jsPDF, the output method is called directly on the instance.
+    // If doc is the result of the async generatePDF, it should be the jsPDF instance.
+    try {
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      const printWindow = window.open(url);
+      if (printWindow) {
+        printWindow.addEventListener('load', () => { printWindow.print(); });
+      }
+    } catch (e) {
+      console.error("Printing failed:", e);
+      toast({ variant: "destructive", title: "Print Error", description: "Could not generate print preview." });
     }
   };
 
@@ -308,8 +331,19 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
               <ReceiptText className="h-4 w-4 mr-1" /> Invoice
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleDownload}><Download className="h-4 w-4 mr-1" /> PDF</Button>
-          <Button variant="outline" size="sm" onClick={handlePrint}><Printer className="h-4 w-4 mr-1" /> Print</Button>
+          <Button variant="outline" size="sm" onClick={async () => {
+            const doc = await generatePDF();
+            doc.save(`${deliveryNote.deliveryNoteNumber}.pdf`);
+          }}><Download className="h-4 w-4 mr-1" /> PDF</Button>
+          <Button variant="outline" size="sm" onClick={async () => {
+            const doc = await generatePDF();
+            const blob = doc.output('blob');
+            const url = URL.createObjectURL(blob);
+            const printWindow = window.open(url);
+            if (printWindow) {
+              printWindow.addEventListener('load', () => { printWindow.print(); });
+            }
+          }}><Printer className="h-4 w-4 mr-1" /> Print</Button>
         </div>
       </div>
 
@@ -393,42 +427,54 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
 
           {/* Items table */}
           <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-success text-white">
-                  <th className="text-left py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Item</th>
-                  <th className="text-center py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Qty</th>
-                  <th className="text-right py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Price</th>
-                  <th className="text-right py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, idx) => (
-                  <tr key={idx} className={idx % 2 === 0 ? 'bg-muted/30' : ''}>
-                    <td className="py-2.5 px-3 font-medium">{item.productName}</td>
-                    <td className="py-2.5 px-3 text-center">{item.quantity}</td>
-                    <td className="py-2.5 px-3 text-right">K{item.unitPrice.toFixed(2)}</td>
-                    <td className="py-2.5 px-3 text-right font-bold">K{item.lineTotal.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+               <table className="w-full text-sm">
+                 <thead>
+                   <tr className="bg-success text-white">
+                     <th className="text-left py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Item</th>
+                     <th className="text-center py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Qty</th>
+                     {!hidePrices && (
+                       <>
+                         <th className="text-right py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Price</th>
+                         <th className="text-right py-2.5 px-3 font-semibold text-xs uppercase tracking-wider">Total</th>
+                       </>
+                     )}
+                   </tr>
+                 </thead>
+                 <tbody>
+                   {items.map((item, idx) => (
+                     <tr key={idx} className={idx % 2 === 0 ? 'bg-muted/30' : ''}>
+                       <td className="py-2.5 px-3 font-medium">{item.productName}</td>
+                       <td className="py-2.5 px-3 text-center">{item.quantity}</td>
+                       {!hidePrices && (
+                         <>
+                           <td className="py-2.5 px-3 text-right">K{item.unitPrice.toFixed(2)}</td>
+                           <td className="py-2.5 px-3 text-right font-bold">K{item.lineTotal.toFixed(2)}</td>
+                         </>
+                       )}
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+
           </div>
 
-          {/* Total */}
-          <div className="flex justify-end">
-            <div className="w-full max-w-xs space-y-1.5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Items</span>
-                <span>{items.length}</span>
-              </div>
-              <Separator />
-              <div className="flex justify-between items-center bg-success text-white rounded-lg px-4 py-2.5">
-                <span className="font-bold text-base">TOTAL</span>
-                <span className="font-bold text-lg">K{total.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
+           {/* Total */}
+           {!hidePrices && (
+             <div className="flex justify-end">
+               <div className="w-full max-w-xs space-y-1.5 text-sm">
+                 <div className="flex justify-between">
+                   <span className="text-muted-foreground">Total Items</span>
+                   <span>{items.length}</span>
+                 </div>
+                 <Separator />
+                 <div className="flex justify-between items-center bg-success text-white rounded-lg px-4 py-2.5">
+                   <span className="font-bold text-base">TOTAL</span>
+                   <span className="font-bold text-lg">K{total.toFixed(2)}</span>
+                 </div>
+               </div>
+             </div>
+           )}
+
 
           {/* Payment details */}
           {bankRows.length > 0 && (
