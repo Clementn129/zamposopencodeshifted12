@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { DeliveryNote } from "@/hooks/useDeliveryNotes";
+import { printHtml } from "@/lib/printHelper";
 import jsPDF from "jspdf";
 
 interface DeliveryNoteViewProps {
@@ -295,20 +296,136 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
   };
 
   const handlePrint = async () => {
-    const doc = await generatePDF();
-    // For jsPDF, the output method is called directly on the instance.
-    // If doc is the result of the async generatePDF, it should be the jsPDF instance.
-    try {
-      const blob = doc.output('blob');
-      const url = URL.createObjectURL(blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => { printWindow.print(); });
-      }
-    } catch (e) {
-      console.error("Printing failed:", e);
-      toast({ variant: "destructive", title: "Print Error", description: "Could not generate print preview." });
-    }
+    const html = `
+      <div style="max-width: 800px; margin: 0 auto; padding: 20px; color: #333;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+          <div style="display: flex; gap: 20px; align-items: center;">
+            ${businessDetails.logoUrl ? `<img src="${businessDetails.logoUrl}" style="width: 64px; height: 64px; object-fit: contain;" />` : ''}
+            <div>
+              <h1 style="margin: 0; font-size: 20px; color: #1a1a1a;">${businessName}</h1>
+              <div style="font-size: 12px; color: #666; line-height: 1.4;">
+                ${businessDetails.address ? `<div>${businessDetails.address}</div>` : ''}
+                <div style="display: flex; gap: 10px;">
+                  ${businessDetails.phone ? `<span>${businessDetails.phone}</span>` : ''}
+                  ${businessDetails.email ? `<span>${businessDetails.email}</span>` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 24px; font-weight: bold; color: #22c55e;">DELIVERY NOTE</div>
+            <div style="font-family: monospace; font-size: 14px; color: #666;">${deliveryNote.deliveryNoteNumber}</div>
+          </div>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; font-size: 12px; margin-bottom: 20px;">
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Date</div>
+            <div style="font-weight: 500;">${new Date(deliveryNote.createdAt).toLocaleDateString()}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Status</div>
+            <div style="font-weight: 500;">${status.label}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Driver</div>
+            <div style="font-weight: 500;">${deliveryNote.driverName || 'N/A'}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Car Plate</div>
+            <div style="font-weight: 500;">${deliveryNote.carPlate || 'N/A'}</div>
+          </div>
+        </div>
+
+        ${(deliveryNote.customerName || deliveryNote.deliveryAddress) ? `
+        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 13px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 5px;">Deliver To</div>
+          <div style="font-weight: 600; font-size: 15px;">${deliveryNote.customerName || ''}</div>
+          <div style="color: #666; font-size: 12px; margin-top: 4px;">
+            ${deliveryNote.customerPhone ? `<span>${deliveryNote.customerPhone}</span>` : ''}
+            ${deliveryNote.deliveryAddress ? `<div style="margin-top: 4px;">${deliveryNote.deliveryAddress}</div>` : ''}
+          </div>
+        </div>
+        ` : ''}
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
+          <thead>
+            <tr style="background: #22c55e; color: white; text-align: left;">
+              <th style="padding: 10px; font-size: 11px; text-transform: uppercase;">Item</th>
+              <th style="padding: 10px; text-align: center; font-size: 11px; text-transform: uppercase;">Qty</th>
+              ${!hidePrices ? `
+              <th style="padding: 10px; text-align: right; font-size: 11px; text-transform: uppercase;">Price</th>
+              <th style="padding: 10px; text-align: right; font-size: 11px; text-transform: uppercase;">Total</th>
+              ` : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((item, idx) => `
+              <tr style="${idx % 2 === 0 ? 'background: #f9fafb;' : ''}">
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}</td>
+                <td style="padding: 10px; text-align: center; border-bottom: 1px solid #eee;">${item.quantity}</td>
+                ${!hidePrices ? `
+                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee;">K${item.unitPrice.toFixed(2)}</td>
+                <td style="padding: 10px; text-align: right; font-weight: bold; border-bottom: 1px solid #eee;">K${item.lineTotal.toFixed(2)}</td>
+                ` : ''}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        ${!hidePrices ? `
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+          <div style="width: 200px; text-align: right; font-size: 14px;">
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666;">Total Items</span>
+              <span>${items.length}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; background: #22c55e; color: white; padding: 10px; border-radius: 8px; margin-top: 10px; font-weight: bold; font-size: 16px;">
+              <span>TOTAL</span>
+              <span>K${total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        ${bankRows.length > 0 ? `
+        <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 12px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 10px;">Payment Details</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            ${bankRows.map(row => `<div><span style="color: #888;">${row.label}:</span> ${row.value}</div>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${deliveryNote.notes ? `
+        <div style="margin-bottom: 20px; font-size: 12px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 5px;">Notes</div>
+          <div style="color: #666; white-space: pre-wrap;">${deliveryNote.notes}</div>
+        </div>
+        ` : ''}
+
+        ${(deliveryNote.deliveredBy || deliveryNote.receivedBy) ? `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 40px; font-size: 12px;">
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 30px;">Delivered By</div>
+            <div style="border-bottom: 1px dashed #ccc; text-align: center; font-weight: 500;">${deliveryNote.deliveredBy || ''}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 30px;">Received By</div>
+            <div style="border-bottom: 1px dashed #ccc; text-align: center; font-weight: 500;">${deliveryNote.receivedBy || ''}</div>
+          </div>
+        </div>
+        ` : ''}
+
+        <div style="text-align: center; font-size: 10px; color: #ccc; margin-top: 40px;">
+          Generated by Sale Point
+        </div>
+      </div>
+    `;
+    
+    printHtml(html, deliveryNote.deliveryNoteNumber);
   };
 
   return (
@@ -335,15 +452,7 @@ const DeliveryNoteView = ({ deliveryNote, businessName, businessDetails, onBack,
             const doc = await generatePDF();
             doc.save(`${deliveryNote.deliveryNoteNumber}.pdf`);
           }}><Download className="h-4 w-4 mr-1" /> PDF</Button>
-          <Button variant="outline" size="sm" onClick={async () => {
-            const doc = await generatePDF();
-            const blob = doc.output('blob');
-            const url = URL.createObjectURL(blob);
-            const printWindow = window.open(url);
-            if (printWindow) {
-              printWindow.addEventListener('load', () => { printWindow.print(); });
-            }
-          }}><Printer className="h-4 w-4 mr-1" /> Print</Button>
+           <Button variant="outline" size="sm" onClick={handlePrint}><Printer className="h-4 w-4 mr-1" /> Print</Button>
         </div>
       </div>
 

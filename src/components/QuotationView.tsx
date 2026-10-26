@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Quotation, QuotationItem } from "@/hooks/useQuotations";
+import { printHtml } from "@/lib/printHelper";
 import jsPDF from "jspdf";
 
 interface QuotationViewProps {
@@ -285,13 +286,140 @@ const QuotationView = ({ quotation, businessName, businessDetails, onBack, onEdi
   };
 
   const handlePrint = async () => {
-    const doc = await generatePDF();
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    const printWindow = window.open(url);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => { printWindow.print(); });
-    }
+    const html = `
+      <div style="max-width: 800px; margin: 0 auto; padding: 20px; color: #333;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+          <div style="display: flex; gap: 20px; align-items: center;">
+            ${businessDetails.logoUrl ? `<img src="${businessDetails.logoUrl}" style="width: 64px; height: 64px; object-fit: contain;" />` : ''}
+            <div>
+              <h1 style="margin: 0; font-size: 20px; color: #1a1a1a;">${businessName}</h1>
+              <div style="font-size: 12px; color: #666; line-height: 1.4;">
+                ${businessDetails.address ? `<div>${businessDetails.address}</div>` : ''}
+                <div style="display: flex; gap: 10px;">
+                  ${businessDetails.phone ? `<span>${businessDetails.phone}</span>` : ''}
+                  ${businessDetails.email ? `<span>${businessDetails.email}</span>` : ''}
+                </div>
+                ${businessDetails.tpin ? `<div style="margin-top: 2px;">TPIN: ${businessDetails.tpin}</div>` : ''}
+              </div>
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 24px; font-weight: bold; color: #2563eb;">QUOTATION</div>
+            <div style="font-family: monospace; font-size: 14px; color: #666;">${quotation.quotationNumber}</div>
+          </div>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; font-size: 12px; margin-bottom: 20px;">
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Date</div>
+            <div style="font-weight: 500;">${new Date(quotation.createdAt).toLocaleDateString()}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Expires</div>
+            <div style="font-weight: 500;">${quotation.expiryDate ? new Date(quotation.expiryDate).toLocaleDateString() : 'N/A'}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Status</div>
+            <div style="font-weight: 500;">${status.label}</div>
+          </div>
+          <div>
+            <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px;">Modified</div>
+            <div style="font-weight: 500;">${new Date(quotation.updatedAt).toLocaleDateString()}</div>
+          </div>
+        </div>
+
+        ${(quotation.customerName || quotation.customerTpin) ? `
+        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 13px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 5px;">Bill To</div>
+          <div style="font-weight: 600; font-size: 15px;">${quotation.customerName || ''}</div>
+          <div style="color: #666; font-size: 12px; margin-top: 4px;">
+            ${quotation.customerPhone ? `<span>${quotation.customerPhone}</span>` : ''}
+            ${quotation.customerEmail ? `<span>${quotation.customerEmail}</span>` : ''}
+            ${quotation.customerTpin ? `<span style="margin-left: 10px;">TPIN: ${quotation.customerTpin}</span>` : ''}
+          </div>
+        </div>
+        ` : ''}
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
+          <thead>
+            <tr style="background: #2563eb; color: white; text-align: left;">
+              <th style="padding: 10px; font-size: 11px; text-transform: uppercase;">Item</th>
+              <th style="padding: 10px; text-align: center; font-size: 11px; text-transform: uppercase;">Qty</th>
+              <th style="padding: 10px; text-align: right; font-size: 11px; text-transform: uppercase;">Price</th>
+              <th style="padding: 10px; text-align: right; font-size: 11px; text-transform: uppercase;">Disc.</th>
+              <th style="padding: 10px; text-align: right; font-size: 11px; text-transform: uppercase;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((item, idx) => `
+              <tr style="${idx % 2 === 0 ? 'background: #f9fafb;' : ''}">
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.productName}</td>
+                <td style="padding: 10px; text-align: center; border-bottom: 1px solid #eee;">${item.quantity}</td>
+                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee;">K${item.unitPrice.toFixed(2)}</td>
+                <td style="padding: 10px; text-align: right; border-bottom: 1px solid #eee; color: #666;">
+                  ${item.discountType === 'percentage' ? (item.discountValue > 0 ? `${item.discountValue}%` : '-') : (item.discountValue > 0 ? `K${item.discountValue.toFixed(2)}` : '-')}
+                </td>
+                <td style="padding: 10px; text-align: right; font-weight: bold; border-bottom: 1px solid #eee;">K${item.lineTotal.toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+          <div style="width: 250px; text-align: right; font-size: 14px;">
+            ${quotation.taxAmount > 0 ? `
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666;">Subtotal (excl.)</span>
+              <span>K${Math.max(0, quotation.total - quotation.taxAmount).toFixed(2)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666;">Tax</span>
+              <span>K${quotation.taxAmount.toFixed(2)}</span>
+            </div>
+            ` : `
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666;">Subtotal</span>
+              <span>K${quotation.subtotal.toFixed(2)}</span>
+            </div>
+            `}
+            ${quotation.discountAmount > 0 ? `
+            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee; color: #dc2626;">
+              <span>Discount</span>
+              <span>-K${quotation.discountAmount.toFixed(2)}</span>
+            </div>
+            ` : ''}
+            <div style="display: flex; justify-content: space-between; background: #2563eb; color: white; padding: 10px; border-radius: 8px; margin-top: 10px; font-weight: bold; font-size: 16px;">
+              <span>TOTAL</span>
+              <span>K${quotation.total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        ${bankRows.length > 0 ? `
+        <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 12px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 10px;">Payment Details</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            ${bankRows.map(row => `<div><span style="color: #888;">${row.label}:</span> ${row.value}</div>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${quotation.notes ? `
+        <div style="margin-bottom: 20px; font-size: 12px;">
+          <div style="font-weight: bold; color: #888; text-transform: uppercase; font-size: 10px; margin-bottom: 5px;">Notes / Terms</div>
+          <div style="color: #666; white-space: pre-wrap;">${quotation.notes}</div>
+        </div>
+        ` : ''}
+
+        <div style="text-align: center; font-size: 10px; color: #ccc; margin-top: 40px;">
+          Generated by Sale Point
+        </div>
+      </div>
+    `;
+    
+    printHtml(html, quotation.quotationNumber);
   };
 
   return (
