@@ -79,7 +79,8 @@ type DebtorPayment = {
   payment_date: string;
 };
 
-type FilterPeriod = "today" | "week" | "month" | "all";
+type FilterPeriod = "today" | "week" | "month" | "all" | "custom";
+
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -100,7 +101,10 @@ const SalesHistory = () => {
   const [offlineSales, setOfflineSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<FilterPeriod>("today");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -127,8 +131,20 @@ const SalesHistory = () => {
     if (period === "today") return { from: startOfDay(now).toISOString(), to: null as string | null };
     if (period === "week") return { from: startOfWeek(now, { weekStartsOn: 1 }).toISOString(), to: null as string | null };
     if (period === "month") return { from: startOfMonth(now).toISOString(), to: null as string | null };
-    return { from: null as string | null, to: null as string | null }; // "all" — still hard-capped below
-  }, [activeTab, period, selectedMonth, selectedYear]);
+    if (period === "custom") {
+      const from = customStartDate ? new Date(customStartDate).toISOString() : null;
+      const to = customEndDate ? new Date(customEndDate).toISOString() : null;
+      // Ensure 'to' date includes the full day
+      if (to) {
+        const endOfDay = new Date(customEndDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return { from, to: endOfDay.toISOString() };
+      }
+      return { from, to: null };
+    }
+    return { from: null as string | null, to: null as string | null }; // "all"
+  }, [activeTab, period, selectedMonth, selectedYear, customStartDate, customEndDate]);
+
 
   const PAGE_LIMIT = 500; // hard cap to protect the client even on "all"
 
@@ -362,7 +378,8 @@ const SalesHistory = () => {
 
   const filteredSales = useMemo(() => {
     const now = new Date();
-    let startDate: Date;
+    let startDate: Date | null = null;
+    let endDate: Date | null = null;
 
     switch (period) {
       case "today":
@@ -374,11 +391,23 @@ const SalesHistory = () => {
       case "month":
         startDate = startOfMonth(now);
         break;
+      case "custom":
+        startDate = customStartDate ? new Date(customStartDate) : null;
+        endDate = customEndDate ? new Date(customEndDate) : null;
+        if (endDate) {
+          endDate.setHours(23, 59, 59, 999);
+        }
+        break;
       default:
         return allSales;
     }
 
-    const periodFiltered = allSales.filter((s) => new Date(s.createdAt) >= startDate);
+    const periodFiltered = allSales.filter((s) => {
+      const saleDate = new Date(s.createdAt);
+      if (startDate && saleDate < startDate) return false;
+      if (endDate && saleDate > endDate) return false;
+      return true;
+    });
     if (!receiptSearch.trim()) return periodFiltered;
     const q = receiptSearch.trim().toLowerCase();
     return periodFiltered.filter((s) =>
@@ -386,11 +415,13 @@ const SalesHistory = () => {
       `INV-${s.id.replace(/-/g, '').slice(-6).toUpperCase()}`.toLowerCase().includes(q) ||
       s.id.slice(-8).toUpperCase().toLowerCase().includes(q)
     );
-  }, [allSales, period, receiptSearch]);
+  }, [allSales, period, receiptSearch, customStartDate, customEndDate]);
+
 
   const filteredExpenses = useMemo(() => {
     const now = new Date();
-    let startDate: Date;
+    let startDate: Date | null = null;
+    let endDate: Date | null = null;
 
     switch (period) {
       case "today":
@@ -402,12 +433,25 @@ const SalesHistory = () => {
       case "month":
         startDate = startOfMonth(now);
         break;
+      case "custom":
+        startDate = customStartDate ? new Date(customStartDate) : null;
+        endDate = customEndDate ? new Date(customEndDate) : null;
+        if (endDate) {
+          endDate.setHours(23, 59, 59, 999);
+        }
+        break;
       default:
         return expenses;
     }
 
-    return expenses.filter((e) => parseDateString(e.expense_date) >= startDate);
-  }, [expenses, period]);
+    return expenses.filter((e) => {
+      const expenseDate = parseDateString(e.expense_date);
+      if (startDate && expenseDate < startDate) return false;
+      if (endDate && expenseDate > endDate) return false;
+      return true;
+    });
+  }, [expenses, period, customStartDate, customEndDate]);
+
 
   // Monthly filtered data
   const monthlyFilteredSales = useMemo(() => {
@@ -761,12 +805,20 @@ const SalesHistory = () => {
 
   const handleExportCsv = () => {
     const salesToExport = activeTab === "monthly" ? monthlyFilteredSales : filteredSales;
-    const filename = activeTab === "monthly" 
-      ? `${business.name.replace(/\s+/g, '-')}-${MONTHS[selectedMonth]}-${selectedYear}-sales`
-      : `${business.name.replace(/\s+/g, '-')}-sales`;
+    let filename = `${business.name.replace(/\s+/g, '-')}-sales`;
+    
+    if (activeTab === "monthly") {
+      filename = `${business.name.replace(/\s+/g, '-')}-${MONTHS[selectedMonth]}-${selectedYear}-sales`;
+    } else if (period === "custom" && (customStartDate || customEndDate)) {
+      const from = customStartDate || "start";
+      const to = customEndDate || "end";
+      filename = `${business.name.replace(/\s+/g, '-')}_${from}_to_${to}_sales`;
+    }
+    
     exportSalesToCsv(salesToExport, filename);
     toast({ title: 'Exported', description: 'Sales data downloaded as CSV' });
   };
+
 
   const renderSaleItem = (sale: Sale) => (
     <div key={sale.id} className={`bg-secondary rounded-lg p-3 ${sale.status === 'refunded' ? 'opacity-60' : ''}`}>
@@ -1008,20 +1060,44 @@ const SalesHistory = () => {
             {/* Quick View Tab */}
             <TabsContent value="quick" className="space-y-4">
               {/* Period Filter */}
-              <div className="flex justify-end">
-                <Select value={period} onValueChange={(v) => setPeriod(v as FilterPeriod)}>
-                  <SelectTrigger className="w-full max-w-[140px]">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="week">This Week</SelectItem>
-                    <SelectItem value="month">This Month</SelectItem>
-                    <SelectItem value="all">All Time</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <Select value={period} onValueChange={(v) => setPeriod(v as FilterPeriod)}>
+                    <SelectTrigger className="h-8 w-[140px] text-xs shrink-0">
+                      <Calendar className="h-4 w-4 mr-2 shrink-0" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                      <SelectItem value="all">All Time</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {period === "custom" && (
+                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 flex-wrap justify-end">
+                      <div className="flex items-center gap-1">
+                        <Label className="text-[10px] text-muted-foreground whitespace-nowrap">From</Label>
+                        <Input 
+                          type="date" 
+                          value={customStartDate} 
+                          onChange={(e) => setCustomStartDate(e.target.value)}
+                          className="h-8 w-32 text-xs pl-2"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Label className="text-[10px] text-muted-foreground whitespace-nowrap">To</Label>
+                        <Input 
+                          type="date" 
+                          value={customEndDate} 
+                          onChange={(e) => setCustomEndDate(e.target.value)}
+                          className="h-8 w-32 text-xs pl-2"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
 
               {/* Stats Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
