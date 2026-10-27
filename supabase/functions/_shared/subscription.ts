@@ -85,7 +85,7 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
   );
   const body = await res.json().catch(() => null);
   const apiMessage = String(body?.message ?? "");
-
+ 
   // Lenco answers an unknown reference with a non-2xx (usually 404) and a
   // "Collection details was not found" message. A just-created collection can
   // 404 for a few seconds while the widget's reference propagates, so treat it
@@ -94,17 +94,17 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
   if (notFoundYet) {
     throw new Error("Payment is still pending confirmation — your subscription will update automatically once it clears. Please don't pay again.");
   }
-
+ 
   // Any other hard HTTP failure (401/403 = bad secret, 5xx = Lenco down).
   if (!res.ok) {
     throw new Error(apiMessage || `Lenco verification failed (HTTP ${res.status})`);
   }
-
+ 
   // Lenco can also reply 200 with { status: false, message } for API problems.
   if (!body?.status || !body?.data) {
     throw new Error(apiMessage || "Lenco verification failed");
   }
-
+ 
   const payment = body.data;
   const paidStatus = String(payment?.status ?? "").toLowerCase();
   if (paidStatus !== "successful") {
@@ -117,9 +117,13 @@ export async function verifyAndExtendSubscription({ reference, businessId, month
     throw new Error(`Payment not completed (status: ${payment?.status || "unknown"})`);
   }
   if (String(payment?.currency ?? "").toUpperCase() !== "ZMW") throw new Error("Payment currency mismatch");
-  if (Number(payment?.amount ?? 0) < expectedAmount) {
-    throw new Error(`Paid amount ZMW ${payment?.amount} is below the required ZMW ${expectedAmount}`);
+  
+  // Modified: Allow for small rounding differences (e.g., 0.01 ZMW) to prevent strict failure
+  const paidAmount = Number(payment?.amount ?? 0);
+  if (paidAmount < (expectedAmount - 0.01)) {
+    throw new Error(`Paid amount ZMW ${paidAmount} is below the required ZMW ${expectedAmount}`);
   }
+
 
   const now = new Date();
 

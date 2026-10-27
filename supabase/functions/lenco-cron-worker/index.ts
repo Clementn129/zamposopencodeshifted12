@@ -33,15 +33,7 @@ serve(async (req) => {
 
     for (const payment of pendingPayments) {
       try {
-        // We bypass the callerId check in the shared util for the cron worker 
-        // by acting as the admin. We'll need to slightly adjust the shared util 
-        // or use a specific flag. 
-        // Since we are the Service Role, we can just call a modified version or a direct update.
-        
-        // Instead of calling verifyAndExtendSubscription (which requires a callerId),
-        // we'll implement the verification logic here or adapt the shared util.
-        
-        // For now, we'll manually verify Lenco status
+        // Manual verification of Lenco status
         const LENCO_BASE_URL = Deno.env.get("LENCO_BASE_URL") ?? "https://sandbox.lenco.co/access/v2";
         const LENCO_SECRET_KEY = Deno.env.get("LENCO_SECRET_KEY")!;
         
@@ -50,32 +42,32 @@ serve(async (req) => {
           { headers: { Authorization: `Bearer ${LENCO_SECRET_KEY}` } },
         );
         const body = await res.json().catch(() => null);
-
+ 
         if (res.ok && body?.status === "successful") {
           // Payment is successful! We now extend the subscription.
-          // We reuse the core logic: find business, calculate expiry, update.
-          
           const { data: biz } = await admin
             .from("businesses")
             .select("id, subscription_expires_at")
             .eq("id", payment.business_id)
             .single();
-
+ 
           if (biz) {
             const now = new Date();
             const currentExpiry = biz.subscription_expires_at ? new Date(biz.subscription_expires_at) : null;
             const startPoint = currentExpiry && currentExpiry > now ? currentExpiry : now;
             const newExpiry = new Date(startPoint);
             newExpiry.setMonth(newExpiry.getMonth() + payment.months);
-
-            await admin.from("businesses").update({
+ 
+            const { error: updateErr } = await admin.from("businesses").update({
               subscription_status: "active",
               subscription_expires_at: newExpiry.toISOString(),
               is_locked: false,
               updated_at: now.toISOString(),
             }).eq("id", payment.business_id);
 
-            // Record in the payments table for admin visibility
+            if (updateErr) throw updateErr;
+ 
+            // Record in the payments table
             await admin.from("payments").insert({
               business_id: payment.business_id,
               amount: payment.amount,
@@ -84,7 +76,7 @@ serve(async (req) => {
               lenco_reference: payment.lenco_reference,
               notes: `Automated cron renewal: ${payment.months} month(s)`,
             });
-
+ 
             await admin.from("pending_payments").update({ status: "completed", verified_at: now.toISOString() }).eq("id", payment.id);
             completedCount++;
           }
@@ -98,8 +90,12 @@ serve(async (req) => {
         }
       } catch (e) {
         console.error(`Error processing payment ${payment.lenco_reference}:`, e);
+        // Explicitly mark as failed if a database/runtime error occurred during extension
+        await admin.from("pending_payments").update({ status: "failed" }).eq("id", payment.id).catch(console.error);
+        failedCount++;
       }
     }
+
 
     return new Response(
       JSON.stringify({ 
