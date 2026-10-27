@@ -13,6 +13,7 @@
     "release:electron": "npm run build && electron-builder --publish always",
     "lint": "eslint .",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "build": {

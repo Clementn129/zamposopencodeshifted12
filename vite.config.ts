@@ -8,6 +8,9 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => ({
   // Absolute base: the desktop shell serves the app from app://bundle/.
   base: "/",
+  build: {
+    chunkSizeWarningLimit: 1500,
+  },
   esbuild: mode === "production"
     ? { pure: ["console.log", "console.debug", "console.info"] }
     : undefined,

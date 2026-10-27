@@ -21,15 +21,19 @@ dist-ssr
 # Build output
 dist/
 dist-ssr/
+build/
+*.js.map
 
 # Electron build output
 dist_electron/
 release/
-*.js.map
 ZAM POS-win32-x64/
 cloudflare desktop app rebuild/
 cloudflare desktop app and android app rebuild/
 *.exe
+
+# Coverage
+coverage/
 
 # Offline installer secrets and client delivery artefacts (never commit)
 scripts/.secrets/
