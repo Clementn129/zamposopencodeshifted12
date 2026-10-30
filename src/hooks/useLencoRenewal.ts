@@ -83,30 +83,55 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
 
   useEffect(() => {
     preloadLenco();
+    let cancelled = false;
 
     (async () => {
       if (!businessId) return;
-      
-      const { data: pending } = await supabase
+
+      // Pick the most recent pending row (maybeSingle errors when >1 row matches,
+      // which previously broke recovery entirely for businesses with several
+      // abandoned checkouts).
+      const { data: pending } = await (supabase as any)
         .from("pending_payments")
         .select("*")
         .eq("business_id", businessId)
         .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (!pending) return;
+      if (cancelled || !pending) return;
+
+      // Don't hammer ancient abandoned checkouts — only auto-resume recent ones.
+      const ageMs = Date.now() - new Date(pending.created_at).getTime();
+      if (ageMs > 2 * 60 * 60 * 1000) return;
 
       const result = await verifyWithRetry(pending.lenco_reference, businessId, pending.months, 3);
+      if (cancelled) return;
+
       if (result.status === "success") {
+        await (supabase as any)
+          .from("pending_payments")
+          .update({ status: "completed", verified_at: new Date().toISOString() })
+          .eq("lenco_reference", pending.lenco_reference);
+        if (cancelled) return;
         toast({
           title: "Payment confirmed",
           description: `Subscription extended to ${new Date(String(result.data?.newExpiry)).toLocaleDateString()}.`,
         });
         await onRenewed?.(String(result.data?.newExpiry));
       } else if (result.status === "consumed") {
-        // Already processed
+        // Already applied by another path — mark it so we stop re-checking forever.
+        await (supabase as any)
+          .from("pending_payments")
+          .update({ status: "completed", verified_at: new Date().toISOString() })
+          .eq("lenco_reference", pending.lenco_reference);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   const payWithLenco = useCallback(async () => {
@@ -131,7 +156,7 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
     try {
       const reference = `sub-${paymentCode}-${Date.now()}`;
 
-      const { error: dbErr } = await supabase.from("pending_payments").insert({
+      const { error: dbErr } = await (supabase as any).from("pending_payments").insert({
         lenco_reference: reference,
         business_id: businessId,
         months,
@@ -153,7 +178,7 @@ export function useLencoRenewal({ businessId, paymentCode, email, months, amount
       });
 
       if (result.status === "success") {
-        await supabase.from("pending_payments").update({ status: "completed" }).eq("lenco_reference", reference);
+        await (supabase as any).from("pending_payments").update({ status: "completed" }).eq("lenco_reference", reference);
         
         toast({
           title: "Payment successful",

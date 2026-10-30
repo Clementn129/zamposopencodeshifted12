@@ -96,7 +96,9 @@ const CashierActivity = () => {
       .subscribe();
     const onSync = () => { void load(); };
     window.addEventListener("zampos:sync-complete", onSync);
-    const interval = setInterval(() => { void load(); }, 60000);
+    // Fallback poll (realtime channel above already refreshes on sale/cashier
+    // changes). Kept at 5 min to cut egress while keeping a safety net.
+    const interval = setInterval(() => { void load(); }, 300000);
     return () => {
       void supabase.removeChannel(channel);
       window.removeEventListener("zampos:sync-complete", onSync);

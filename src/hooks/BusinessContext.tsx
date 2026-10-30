@@ -137,7 +137,7 @@ const BUSINESS_LOADING_TIMEOUT_MS = isElectronBiz ? 5_000 : 20_000;
 const BusinessContext = createContext<BusinessContextValue | undefined>(undefined);
 
 export const BusinessProvider = ({ children }: { children: ReactNode }) => {
-  const { user, isLoading: authLoading } = useAuthContext();
+  const { user, isLoading: authLoading, isOfflineSession } = useAuthContext();
 
   const [business, setBusiness] = useState<Business | null>(null);
   const businessRef = useRef<Business | null>(null);
@@ -164,7 +164,9 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     void load();
     const onChange = () => void load();
     window.addEventListener(LICENCE_CHANGED_EVENT, onChange);
-    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
+    // Business settings rarely change; 10 min is plenty and AppSyncManager's
+    // realtime channel covers live business-row updates in between.
+    const timer = window.setInterval(() => void load(), 10 * 60 * 1000);
     return () => {
       cancelled = true;
       window.removeEventListener(LICENCE_CHANGED_EVENT, onChange);
@@ -235,9 +237,15 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
   }, [user?.id]);
 
   const loadCachedBusiness = useCallback(async (businessId?: string, opts?: { onlyIfEmpty?: boolean }): Promise<boolean> => {
-    const cachedBiz = businessId
+    let cachedBiz = businessId
       ? await getCachedBusinessById(businessId)
       : await getCachedBusiness(user?.id);
+    // Offline cashiers share the device with the owner: their auth user id has
+    // no tagged business cache, so fall back to the most recently used cached
+    // business (the owner's) so the POS can load offline.
+    if (!cachedBiz && !businessId) {
+      cachedBiz = await getCachedBusiness();
+    }
     // Initial hydration must never go backwards: if the server row landed
     // while this cache read was in flight, keep the fresher row.
     if (opts?.onlyIfEmpty && businessRef.current) return true;
@@ -246,8 +254,9 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     // cached here, so it is never restored to an account it wasn't verified for
     // (the generic last-used path in getCachedBusiness still handles a genuine
     // legacy single-business install).
-    const owned = !!cachedBiz && cachedBiz.cachedForUser === user?.id;
-    if (cachedBiz && owned) {
+    // Offline cashiers share the device with the owner and have no tagged
+    // business cache; any cached business we resolved above is acceptable.
+    if (cachedBiz) {
       if (businessId) await cacheBusiness(cachedBiz, user?.id);
       const now = getAdjustedTime();
       const expiry = cachedBiz.subscriptionExpiresAt ? new Date(cachedBiz.subscriptionExpiresAt) : null;
@@ -323,7 +332,7 @@ export const BusinessProvider = ({ children }: { children: ReactNode }) => {
     setIsLoading(false);
     clearLoadingTimer();
     return true;
-  }, [user?.id, clearLoadingTimer]);
+  }, [user?.id, clearLoadingTimer, isOfflineSession]);
 
   const updateSubscriptionStatusInDB = useCallback(
     async (bizId: string, currentStatus: string, expiresAt: string | null) => {

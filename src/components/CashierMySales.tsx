@@ -188,7 +188,9 @@ const CashierMySales = ({ businessId, businessName, businessDetails, isService =
     window.addEventListener("zampos:sync-complete", handler);
     window.addEventListener("zampos:sales-changed", handler);
     window.addEventListener("zampos:sale-payment-changed", handler);
-    const interval = setInterval(() => { void loadRef.current(); }, 60000);
+    // Fallback poll in case realtime misses an event — kept long (5 min) since
+    // the realtime channel above already refreshes on every sale change.
+    const interval = setInterval(() => { void loadRef.current(); }, 300000);
     return () => {
       void supabase.removeChannel(channel);
       window.removeEventListener("zampos:sync-complete", handler);

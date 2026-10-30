@@ -19,7 +19,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 const SUPABASE_URL = (supabase as unknown as { supabaseUrl: string }).supabaseUrl;
 const PROBE_URL = `${SUPABASE_URL}/rest/v1/`;
-const PROBE_INTERVAL_MS = 10_000;
+const PROBE_INTERVAL_MS_ONLINE = 30_000;
+const PROBE_INTERVAL_MS_OFFLINE = 10_000;
 const PROBE_TIMEOUT_MS = 6_000;
 const OFFLINE_THRESHOLD = 2; // consecutive failed probes before declaring offline
 
@@ -54,6 +55,8 @@ const probeOnce = async (): Promise<boolean> => {
 };
 
 const runProbe = async () => {
+  // Pause while the tab is backgrounded — saves egress/log ingestion on idle tills.
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
   const reachable = await probeOnce();
   if (reachable) {
     probeFailures = 0;
@@ -66,16 +69,27 @@ const runProbe = async () => {
   }
 };
 
+// Dynamic cadence: slower while online (30s), faster while offline (10s) so we
+// recover quickly but don't spam the gateway when everything is fine.
+const scheduleNext = () => {
+  if (probeTimer) clearTimeout(probeTimer);
+  const delay = onlineState ? PROBE_INTERVAL_MS_ONLINE : PROBE_INTERVAL_MS_OFFLINE;
+  probeTimer = setTimeout(async () => {
+    await runProbe();
+    if (subscriberCount > 0) scheduleNext();
+  }, delay);
+};
+
 const ensureProbeLoop = () => {
   if (probeTimer) return;
-  // Probe immediately on start, then keep probing on an interval.
-  runProbe();
-  probeTimer = setInterval(runProbe, PROBE_INTERVAL_MS);
+  // Probe immediately on start, then keep probing on a dynamic cadence.
+  void runProbe();
+  scheduleNext();
 };
 
 const stopProbeLoopIfIdle = () => {
   if (probeTimer && subscriberCount <= 0) {
-    clearInterval(probeTimer);
+    clearTimeout(probeTimer);
     probeTimer = null;
   }
 };
@@ -103,16 +117,25 @@ export const useOnlineStatus = () => {
       update(false);
     };
     const handleOnline = () => {
-      runProbe();
+      void runProbe();
+      scheduleNext();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void runProbe();
+        scheduleNext();
+      }
     };
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       listeners.delete(update);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibility);
       subscriberCount -= 1;
       stopProbeLoopIfIdle();
     };

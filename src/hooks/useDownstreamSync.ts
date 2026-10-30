@@ -12,6 +12,13 @@ export function useDownstreamSync(businessId: string | undefined) {
   const [isPulling, setIsPulling] = useState(false);
   const pulling = useRef(false);
 
+  // Cadence bookkeeping so we don't re-fetch the whole catalog on every pull.
+  const lastCatalogPull = useRef<number>(0);
+  const lastSalesPull = useRef<number | null>(null);
+  const catalogDirty = useRef<boolean>(false);
+  const CATALOG_MIN_AGE = 30 * 60 * 1000; // 30 min unless a change event marks it dirty
+  const SALES_OVERLAP = 10 * 60 * 1000;   // 10 min overlap so late updates aren't missed
+
   const expLastSyncAt = useCallback(() => {
     if (!businessId) return;
     const now = new Date().toISOString();
@@ -20,6 +27,8 @@ export function useDownstreamSync(businessId: string | undefined) {
 
   const pull = useCallback(async () => {
     if (!businessId || !isOnline || pulling.current) return;
+    // Don't pull while the tab is hidden — saves egress on backgrounded tills.
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
 
     pulling.current = true;
     setIsPulling(true);
@@ -32,33 +41,64 @@ export function useDownstreamSync(businessId: string | undefined) {
         op.type === 'debtor_create' || op.type === 'debtor_payment' || op.type === 'debtor_delete'
       );
 
+      const now = Date.now();
+      const doCatalog = (now - lastCatalogPull.current > CATALOG_MIN_AGE) || catalogDirty.current;
+
+      const since90 = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const salesSince = lastSalesPull.current
+        ? new Date(lastSalesPull.current - SALES_OVERLAP).toISOString()
+        : since90;
+      // Never pull older than the 90-day window even on a stale cursor.
+      const salesFloor = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const salesGte = salesSince > salesFloor ? salesSince : salesFloor;
+
       try {
-        const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-        const [{ data: products }, { data: debtors }, { data: serverSales }] = await Promise.all([
-          supabase
-            .from("products")
-            .select("id, business_id, created_at, name, price, cost_price, stock, opening_stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, track_stock, expiry_date")
-            .eq("business_id", businessId)
-            .order("created_at", { ascending: false })
-            .order("id", { ascending: true })
-            .limit(25000),
-          hasPendingDebtorWork
-            ? Promise.resolve({ data: null })
-            : supabase
+        const queries: any[] = [];
+
+        // Products + debtors only when the catalog is stale or marked dirty.
+        if (doCatalog) {
+          queries.push(
+            supabase
+              .from("products")
+              .select("id, business_id, created_at, name, price, cost_price, stock, opening_stock, minimum_stock, category, barcode, is_active, tax_category, image_url, parent_id, variant_label, item_type, track_expiry, track_stock, expiry_date")
+              .eq("business_id", businessId)
+              .order("created_at", { ascending: false })
+              .order("id", { ascending: true })
+              .limit(25000)
+          );
+          if (hasPendingDebtorWork) {
+            queries.push(Promise.resolve({ data: null }));
+          } else {
+            queries.push(
+              supabase
                 .from("debtors")
                 .select("id, business_id, customer_name, customer_phone, amount_owed, amount_paid, status, notes, created_at, due_date")
                 .eq("business_id", businessId)
-                .limit(1000),
+                .limit(1000)
+            );
+          }
+        } else {
+          // Keep slot alignment: placeholders so Promise.all indices stay stable.
+          queries.push(Promise.resolve({ data: null }));
+          queries.push(Promise.resolve({ data: null }));
+        }
+
+        queries.push(
           supabase
             .from("sales")
             .select("id, items, subtotal, total, discount_amount, payment_method, created_at, status, tax_amount, taxable_amount, zero_rated_amount, exempt_amount, customer_name, customer_tpin, customer_phone, amount_paid, balance_due, payment_status, due_date")
             .eq("business_id", businessId)
-            .gte("created_at", since)
+            .gte("created_at", salesGte)
             .order("created_at", { ascending: false })
-            .limit(20000),
-        ]);
+            .limit(2000)
+        );
 
-        if (products) {
+        const results = await Promise.all(queries);
+        const products = doCatalog ? results[0]?.data : null;
+        const debtors = doCatalog ? results[1]?.data : null;
+        const serverSales = results[results.length - 1]?.data;
+
+        if (doCatalog && products) {
           const mapped = products.map((p: any) => ({
             id: p.id,
             businessId: p.business_id,
@@ -82,14 +122,13 @@ export function useDownstreamSync(businessId: string | undefined) {
             expiryDate: p.expiry_date ?? null,
           }));
 
-          // Merge is always safe: it never drops local rows and preserves
-          // local stock for anything still pending; once the push drain
-          // catches up, subsequent pulls overwrite cleanly.
           await mergeServerProducts(businessId, mapped);
           touchedAnything = true;
+          lastCatalogPull.current = now;
+          catalogDirty.current = false;
         }
 
-        if (debtors) {
+        if (doCatalog && debtors) {
           await cacheDebtors(debtors.map((d: any) => ({
             id: d.id,
             businessId: d.business_id,
@@ -103,6 +142,7 @@ export function useDownstreamSync(businessId: string | undefined) {
             dueDate: d.due_date,
           })));
           touchedAnything = true;
+          lastCatalogPull.current = now;
         }
 
         if (serverSales) {
@@ -130,6 +170,7 @@ export function useDownstreamSync(businessId: string | undefined) {
             dueDate: s.due_date,
           })));
           touchedAnything = true;
+          lastSalesPull.current = now;
         }
       } catch (e) {
         console.warn("Downstream pull failed:", e);
@@ -152,10 +193,13 @@ export function useDownstreamSync(businessId: string | undefined) {
   useEffect(() => {
     if (!businessId || !isOnline) return;
 
+    // Mark catalog dirty when remote changes arrive so the next pull refreshes it.
+    const markCatalogDirty = () => { catalogDirty.current = true; };
+    window.addEventListener("zampos:products-changed", markCatalogDirty);
+    window.addEventListener("zampos:debtors-changed", markCatalogDirty);
+
     // The initial pull is heavy (products + debtors + sales in one round),
-    // so hold it back until the first paint has settled — running it during
-    // mount competes with rendering the POS and doubles as the app's
-    // background refresh. Reconnects and the 60s interval still pull.
+    // so hold it back until the first paint has settled.
     const win = window as Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
@@ -171,12 +215,25 @@ export function useDownstreamSync(businessId: string | undefined) {
       idleHandle = window.setTimeout(startPull, 1500);
     }
 
+    // Slower fallback poll — the realtime channel already refreshes on changes.
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       void pull();
-    }, 60000);
+    }, 5 * 60 * 1000);
+
+    // Pull promptly when the tab becomes visible again.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - (lastSalesPull.current ?? 0) > 2 * 60 * 1000) void pull();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
+      catalogDirty.current = false;
+      window.removeEventListener("zampos:products-changed", markCatalogDirty);
+      window.removeEventListener("zampos:debtors-changed", markCatalogDirty);
+      document.removeEventListener("visibilitychange", onVisible);
       if (idleHandle !== null) {
         if (typeof win.cancelIdleCallback === "function" && typeof win.requestIdleCallback === "function") {
           win.cancelIdleCallback(idleHandle);
