@@ -193,8 +193,18 @@ export function useDownstreamSync(businessId: string | undefined) {
   useEffect(() => {
     if (!businessId || !isOnline) return;
 
-    // Mark catalog dirty when remote changes arrive so the next pull refreshes it.
-    const markCatalogDirty = () => { catalogDirty.current = true; };
+    // Mark catalog dirty when remote changes arrive, and pull promptly (debounced)
+    // so the offline cache (IndexedDB) catches up within a few seconds instead
+    // of waiting for the 5-min poll.
+    let catalogPullTimer: ReturnType<typeof setTimeout> | null = null;
+    const markCatalogDirty = () => {
+      catalogDirty.current = true;
+      if (catalogPullTimer) clearTimeout(catalogPullTimer);
+      catalogPullTimer = setTimeout(() => {
+        catalogPullTimer = null;
+        if (typeof document !== "undefined" && document.visibilityState === "visible") void pull();
+      }, 3000);
+    };
     window.addEventListener("zampos:products-changed", markCatalogDirty);
     window.addEventListener("zampos:debtors-changed", markCatalogDirty);
 
@@ -231,6 +241,7 @@ export function useDownstreamSync(businessId: string | undefined) {
     return () => {
       cancelled = true;
       catalogDirty.current = false;
+      if (catalogPullTimer) clearTimeout(catalogPullTimer);
       window.removeEventListener("zampos:products-changed", markCatalogDirty);
       window.removeEventListener("zampos:debtors-changed", markCatalogDirty);
       document.removeEventListener("visibilitychange", onVisible);

@@ -428,10 +428,16 @@ export function useProducts(businessId: string | undefined) {
         void refetch();
       }, 2000);
     };
+    // sync-complete: periodic/downstream pulls finished.
     window.addEventListener("zampos:sync-complete", handler);
+    // products-changed: realtime push from another device (instant). Refetch so
+    // new/edited products show up within ~2s instead of waiting for the next
+    // downstream pull.
+    window.addEventListener("zampos:products-changed", handler);
     return () => {
       if (timer) clearTimeout(timer);
       window.removeEventListener("zampos:sync-complete", handler);
+      window.removeEventListener("zampos:products-changed", handler);
     };
   }, [refetch]);
 
