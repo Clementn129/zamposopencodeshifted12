@@ -244,6 +244,7 @@ export type Database = {
           business_id: string
           can_adjust_stock: boolean
           can_backdate: boolean
+          can_view_my_sales: boolean
           created_at: string
           display_name: string | null
           id: string
@@ -258,6 +259,7 @@ export type Database = {
           business_id: string
           can_adjust_stock?: boolean
           can_backdate?: boolean
+          can_view_my_sales?: boolean
           created_at?: string
           display_name?: string | null
           id?: string
@@ -272,6 +274,7 @@ export type Database = {
           business_id?: string
           can_adjust_stock?: boolean
           can_backdate?: boolean
+          can_view_my_sales?: boolean
           created_at?: string
           display_name?: string | null
           id?: string

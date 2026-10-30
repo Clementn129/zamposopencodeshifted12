@@ -25,6 +25,7 @@ import QuickAddProduct from "@/components/QuickAddProduct";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useBackdatePermission } from "@/hooks/useBackdatePermission";
+import { useCashierPermissions } from "@/hooks/useCashierPermissions";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { useProducts, Product } from "@/hooks/useProducts";
 import { useSyncStatus } from "@/contexts/SyncStatusContext";
@@ -75,6 +76,7 @@ const Pos = () => {
   const { user, isLoading: authLoading, role, signOut, isOfflineSession } = useAuthContext();
   const { business, isLoading: bizLoading, refetch: refetchBusiness, checkSubscriptionStatus } = useBusiness(user?.id);
   const { canBackdate } = useBackdatePermission();
+  const { canViewMySales } = useCashierPermissions();
   const { isLocked } = checkSubscriptionStatus();
 
   const [cashierName, setCashierName] = useState<string | null>(null);
@@ -105,6 +107,15 @@ const Pos = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState("sale");
+
+  // If the owner hides this cashier's My Sales tab (or a refresh says it is
+  // off) while that tab is open, drop back to the sale tab rather than leaving
+  // dead content mounted.
+  useEffect(() => {
+    if (activeTab === "my-sales" && !(role === "cashier" && canViewMySales)) {
+      setActiveTab("sale");
+    }
+  }, [activeTab, role, canViewMySales]);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [dnQuotation, setDnQuotation] = useState<{
     id: string;
@@ -1239,7 +1250,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
               <TabsTrigger value="invoices" className="flex items-center gap-1.5 shrink-0">
                 <ReceiptText className="h-4 w-4" /> Invoices
               </TabsTrigger>
-              {role === 'cashier' && (
+              {role === 'cashier' && canViewMySales && (
                 <TabsTrigger value="my-sales" className="flex items-center gap-1.5 shrink-0">
                   <Receipt className="h-4 w-4" /> My Sales
                 </TabsTrigger>
@@ -1758,7 +1769,7 @@ const addToCart = async (productId: string, opts?: { modifiers?: CartLine['modif
                 }}
               />
             </TabsContent>
-            {role === 'cashier' && (
+            {role === 'cashier' && canViewMySales && (
               <TabsContent value="my-sales">
                 <CashierMySales
                   businessId={business.id}

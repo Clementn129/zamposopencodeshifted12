@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, KeyRound, Power, Trash2, Users, PackagePlus, CalendarClock } from 'lucide-react';
+import { Loader2, Plus, KeyRound, Power, Trash2, Users, PackagePlus, CalendarClock, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { cacheCashierLookup, cacheOfflineCredentials, hashPassword, generateOfflineId } from '@/lib/offlineStorage';
 
 const NETWORK_ERROR_RE = /fetch|network|failed to connect|timeout|offline/i;
 
@@ -29,6 +30,7 @@ interface Cashier {
   role: string;
   can_adjust_stock: boolean;
   can_backdate: boolean;
+  can_view_my_sales: boolean;
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -61,59 +63,98 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
   const [newRole, setNewRole] = useState('cashier');
   const [newStockAccess, setNewStockAccess] = useState(false);
   const [newBackdate, setNewBackdate] = useState(false);
+  // Default ON: a new cashier keeps the "My Sales" tab unless the owner opts out.
+  const [newMySales, setNewMySales] = useState(true);
   // False until the migration lands. The toggles hide rather than lie.
   const [stockAccessAvailable, setStockAccessAvailable] = useState(true);
   const [backdateAvailable, setBackdateAvailable] = useState(false);
+  const [mySalesAvailable, setMySalesAvailable] = useState(true);
 
   // Reset PIN dialog
   const [resetTarget, setResetTarget] = useState<Cashier | null>(null);
   const [resetPin, setResetPin] = useState('');
 
   const fetchCashiers = useCallback(async () => {
+    try {
+      const key = `farmfront_cashiers_${businessId}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const local = JSON.parse(raw) as any[];
+        if (local && local.length > 0) {
+          setCashiers(local.map((c: any) => ({ id: c.id, username: c.username, display_name: c.display_name, is_active: c.is_active, last_login_at: null, created_at: c.created_at, role: c.role || 'cashier', can_adjust_stock: !!c.can_adjust_stock, can_backdate: !!c.can_backdate, can_view_my_sales: c.can_view_my_sales !== false })));
+          setStockAccessAvailable(true);
+          setBackdateAvailable(true);
+          setMySalesAvailable(true);
+          setLoading(false);
+          if (!isOnline) return;
+        }
+      }
+    } catch {}
     if (!isOnline) {
-      // Don't hit the network (or alarm the user with an error toast) when we
-      // know we're offline. Settings stays usable; the list will load when
-      // the connection returns.
       setLoading(false);
       return;
     }
     setLoading(true);
 
     const LEGACY_COLUMNS = 'id, username, display_name, is_active, last_login_at, created_at, role';
-    const RICH_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock, can_backdate`;
+    const FULL_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock, can_backdate, can_view_my_sales`;
+    const NO_MY_SALES_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock, can_backdate`;
+    const STOCK_ONLY_COLUMNS = `${LEGACY_COLUMNS}, can_adjust_stock`;
+
+    // Normalise one row. Optional grants read as OFF when their column exists but
+    // is null/absent; My Sales is the exception because its default is ON.
+    const mapRow = (c: Record<string, unknown>): Cashier => ({
+      ...(c as unknown as Cashier),
+      can_adjust_stock: c.can_adjust_stock === true,
+      can_backdate: c.can_backdate === true,
+      can_view_my_sales: c.can_view_my_sales !== false,
+    });
 
     const { data, error } = await supabase
       .from('business_cashiers')
-      .select(RICH_COLUMNS)
+      .select(FULL_COLUMNS)
       .eq('business_id', businessId)
       .order('created_at', { ascending: true });
 
     if (error && MISSING_COLUMN_RE.test(error.message)) {
-      // The back-dating migration may not have landed yet. Fall back to the
-      // stock column alone so that toggle keeps working, and hide only the
-      // back-dating toggle instead of claiming it is OFF.
+      // The My Sales migration may not have landed yet. Fall back to the
+      // back-dating shape so that toggle keeps working, and hide only the
+      // My Sales toggle instead of claiming it is OFF.
+      const { data: noMySales, error: noMySalesErr } = await supabase
+        .from('business_cashiers')
+        .select(NO_MY_SALES_COLUMNS)
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: true });
+
+      if (!noMySalesErr) {
+        setStockAccessAvailable(true);
+        setBackdateAvailable(true);
+        setMySalesAvailable(false);
+        setCashiers(((noMySales ?? []) as unknown as Record<string, unknown>[]).map(mapRow));
+        setLoading(false);
+        return;
+      }
+
+      // The back-dating migration may not have landed yet either. Fall back to
+      // the stock column alone and hide the other two toggles rather than
+      // claiming they are OFF.
       const { data: stockOnly, error: stockErr } = await supabase
         .from('business_cashiers')
-        .select(`${LEGACY_COLUMNS}, can_adjust_stock`)
+        .select(STOCK_ONLY_COLUMNS)
         .eq('business_id', businessId)
         .order('created_at', { ascending: true });
 
       if (!stockErr) {
         setStockAccessAvailable(true);
         setBackdateAvailable(false);
-        setCashiers(
-          ((stockOnly ?? []) as unknown as Cashier[]).map((c) => ({
-            ...c,
-            can_adjust_stock: c.can_adjust_stock === true,
-            can_backdate: false,
-          })),
-        );
+        setMySalesAvailable(false);
+        setCashiers(((stockOnly ?? []) as unknown as Record<string, unknown>[]).map(mapRow));
         setLoading(false);
         return;
       }
 
-      // Neither optional column exists. Load the legacy shape so the page still
-      // works; both toggles stay hidden rather than silently claiming OFF.
+      // None of the optional columns exist. Load the legacy shape so the page
+      // still works; every toggle stays hidden rather than silently claiming OFF.
       const { data: legacy, error: legacyErr } = await supabase
         .from('business_cashiers')
         .select(LEGACY_COLUMNS)
@@ -126,9 +167,8 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       }
       setStockAccessAvailable(false);
       setBackdateAvailable(false);
-      setCashiers(
-        ((legacy ?? []) as unknown as Cashier[]).map((c) => ({ ...c, can_adjust_stock: false, can_backdate: false })),
-      );
+      setMySalesAvailable(false);
+      setCashiers(((legacy ?? []) as unknown as Record<string, unknown>[]).map(mapRow));
       setLoading(false);
       return;
     }
@@ -144,14 +184,8 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     } else {
       setStockAccessAvailable(true);
       setBackdateAvailable(true);
-      setCashiers(
-        ((data ?? []) as unknown as Cashier[]).map((c) => ({
-          ...c,
-          // Explicit `=== true`: an absent/null value must read as OFF.
-          can_adjust_stock: c.can_adjust_stock === true,
-          can_backdate: c.can_backdate === true,
-        })),
-      );
+      setMySalesAvailable(true);
+      setCashiers(((data ?? []) as unknown as Record<string, unknown>[]).map(mapRow));
     }
     setLoading(false);
   }, [businessId, isOnline, toast]);
@@ -209,10 +243,6 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
   const atCap = cashierCap !== null && activeCount >= cashierCap;
 
   const handleCreate = async () => {
-    if (atCap) {
-      toast({ variant: 'destructive', title: 'Cashier limit reached', description: `Your plan allows a maximum of ${cashierCap} active cashier${cashierCap === 1 ? '' : 's'}. Contact admin to upgrade.` });
-      return;
-    }
     const username = newUsername.trim().toLowerCase();
     if (!/^[a-z0-9_]{2,20}$/.test(username)) {
       toast({ variant: 'destructive', title: 'Invalid username', description: 'Use 2-20 letters, numbers or underscore.' });
@@ -221,6 +251,55 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     if (!/^\d{4,6}$/.test(newPin)) {
       toast({ variant: 'destructive', title: 'Invalid PIN', description: 'PIN must be 4-6 digits.' });
       return;
+    }
+    if (atCap) {
+      toast({ variant: 'destructive', title: 'Cashier limit reached', description: `Your plan allows a maximum of ${cashierCap} active cashier${cashierCap === 1 ? '' : 's'}. Contact admin to upgrade.` });
+      return;
+    }
+    if (!isOnline) {
+      setBusy(true);
+      try {
+        const id = generateOfflineId();
+        const now = new Date().toISOString();
+        const localCashier: any = { id, businessId, username, display_name: newName.trim() || null, is_active: true, role: newRole, created_at: now, can_adjust_stock: stockAccessAvailable ? newStockAccess : false, can_backdate: backdateAvailable ? newBackdate : false, can_view_my_sales: mySalesAvailable ? newMySales : true };
+        try {
+          const key = `farmfront_cashiers_${businessId}`;
+          const existing = JSON.parse(localStorage.getItem(key) || '[]');
+          existing.push(localCashier);
+          localStorage.setItem(key, JSON.stringify(existing));
+        } catch {}
+        try {
+          const passwordHash = await hashPassword('zampos-' + newPin);
+          await cacheOfflineCredentials({ email: `c-offline-${username}@zampos.local`, passwordHash, userId: id, role: 'cashier', lastOnlineLogin: now });
+        } catch {}
+        const paymentCode = (window as any).__ZAMPOS_PAYMENT_CODE__ || '';
+        const code = paymentCode || businessId.slice(0, 8).toUpperCase();
+        try {
+          await cacheCashierLookup({ lookupKey: `${code}:${username}`, email: `c-offline-${username}@zampos.local`, username, businessCode: code });
+        } catch {}
+        try {
+          localStorage.setItem(`farmfront_cashier_lookup_${code}_${username}`, JSON.stringify({ email: `c-offline-${username}@zampos.local`, username, businessCode: code }));
+        } catch {}
+        try {
+          localStorage.setItem(`zampos_cashier_${code}_${username}`, JSON.stringify({ email: `c-offline-${username}@zampos.local`, username, businessCode: code, pinHash: 'cached' }));
+        } catch {}
+        toast({ title: 'Staff added (offline)', description: `${username} can login offline with business code and PIN.` });
+        setCreateOpen(false);
+        setNewUsername('');
+        setNewName('');
+        setNewPin('');
+        setNewRole('cashier');
+        setNewStockAccess(false);
+        setNewBackdate(false);
+        setNewMySales(true);
+        await fetchCashiers();
+        setBusy(false);
+        return;
+      } catch (e: any) {
+        toast({ variant: 'destructive', title: 'Could not add cashier', description: e?.message || 'Unknown error' });
+        setBusy(false);
+        return;
+      }
     }
     if (!requireOnline()) return;
     setBusy(true);
@@ -247,9 +326,22 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
           if (bdErr) console.warn('Could not set back-dating grant on create:', bdErr.message);
         }
       }
+      // Same approach for My Sales: the column defaults to ON, so only an
+      // explicit opt-out needs writing. Failure is non-fatal.
+      if (mySalesAvailable && !newMySales) {
+        const cashierId = (created as { cashier?: { id?: string } } | null)?.cashier?.id;
+        if (cashierId) {
+          const { error: msErr } = await supabase
+            .from('business_cashiers')
+            .update({ can_view_my_sales: false })
+            .eq('id', cashierId)
+            .eq('business_id', businessId);
+          if (msErr) console.warn('Could not hide My Sales on create:', msErr.message);
+        }
+      }
       toast({ title: 'Staff added', description: `${username} can now sign in with their PIN.` });
       setCreateOpen(false);
-      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier'); setNewStockAccess(false); setNewBackdate(false);
+      setNewUsername(''); setNewName(''); setNewPin(''); setNewRole('cashier'); setNewStockAccess(false); setNewBackdate(false); setNewMySales(true);
       await fetchCashiers();
     } catch (e) {
       toast({ variant: 'destructive', title: 'Could not add cashier', description: e instanceof Error ? e.message : 'Unknown error' });
@@ -264,10 +356,30 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
       toast({ variant: 'destructive', title: 'Invalid PIN', description: 'PIN must be 4-6 digits.' });
       return;
     }
+    if (!isOnline) {
+      setBusy(true);
+      try {
+        const { cacheOfflineCredentials, hashPassword } = await import('@/lib/offlineStorage');
+        const passwordHash = await hashPassword('zampos-' + resetPin);
+        await cacheOfflineCredentials({ email: `c-offline-${resetTarget.username}@zampos.local`, passwordHash, userId: resetTarget.id, role: 'cashier', lastOnlineLogin: new Date().toISOString() });
+        toast({ title: 'PIN reset (offline)', description: `New PIN for ${resetTarget.username} saved locally.` });
+        setResetTarget(null); setResetPin('');
+      } catch (e) {
+        toast({ variant: 'destructive', title: 'Could not reset PIN', description: e instanceof Error ? e.message : 'Unknown error' });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!requireOnline()) return;
     setBusy(true);
     try {
       await callFn('reset_pin', { cashier_id: resetTarget.id, pin: resetPin });
+      try {
+        const { cacheOfflineCredentials, hashPassword } = await import('@/lib/offlineStorage');
+        const passwordHash = await hashPassword('zampos-' + resetPin);
+        await cacheOfflineCredentials({ email: `c-offline-${resetTarget.username}@zampos.local`, passwordHash, userId: resetTarget.id, role: 'cashier', lastOnlineLogin: new Date().toISOString() });
+      } catch {}
       toast({ title: 'PIN reset', description: `New PIN for ${resetTarget.username} saved.` });
       setResetTarget(null); setResetPin('');
     } catch (e) {
@@ -281,6 +393,21 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     if (!c.is_active && atCap) {
       toast({ variant: 'destructive', title: 'Cashier limit reached', description: `Your plan allows a maximum of ${cashierCap} active cashier${cashierCap === 1 ? '' : 's'}. Contact admin to upgrade.` });
       return;
+    }
+    if (!isOnline) {
+      try {
+        const key = `farmfront_cashiers_${businessId}`;
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : [];
+        const updated = arr.map((x: any) => x.id === c.id ? { ...x, is_active: !c.is_active } : x);
+        localStorage.setItem(key, JSON.stringify(updated));
+        toast({ title: c.is_active ? 'Cashier disabled (offline)' : 'Cashier enabled (offline)' });
+        await fetchCashiers();
+        return;
+      } catch (e) {
+        toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
+        return;
+      }
     }
     if (!requireOnline()) return;
     setBusy(true);
@@ -356,11 +483,67 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
     }
   };
 
+  const handleToggleMySales = async (c: Cashier) => {
+    if (!requireOnline()) return;
+    const next = !c.can_view_my_sales;
+    setBusy(true);
+    // Optimistic so the switch feels instant, rolled back on failure.
+    setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_view_my_sales: next } : x));
+    try {
+      // Direct owner-scoped update keeps the toggle independent of the
+      // manage-cashier edge function, which does not know this column.
+      const { error } = await supabase
+        .from('business_cashiers')
+        .update({ can_view_my_sales: next })
+        .eq('id', c.id)
+        .eq('business_id', businessId);
+      if (error) throw error;
+      await fetchCashiers();
+      toast({
+        title: next ? 'My Sales shown' : 'My Sales hidden',
+        description: next
+          ? `${c.display_name || c.username} can see and reprint their own sales again.`
+          : `${c.display_name || c.username} will no longer see the My Sales tab.`,
+      });
+    } catch (e) {
+      setCashiers(prev => prev.map(x => x.id === c.id ? { ...x, can_view_my_sales: c.can_view_my_sales } : x));
+      toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDelete = async (c: Cashier) => {
+    if (!isOnline) {
+      try {
+        const key = `farmfront_cashiers_${businessId}`;
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : [];
+        const updated = arr.filter((x: any) => x.id !== c.id);
+        localStorage.setItem(key, JSON.stringify(updated));
+        try {
+          const { removeLocalCashier } = await import('@/lib/offlineStorage');
+          await removeLocalCashier(c.id);
+        } catch {}
+        toast({ title: 'Cashier removed (offline)' });
+        await fetchCashiers();
+        return;
+      } catch (e) {
+        toast({ variant: 'destructive', title: 'Failed', description: e instanceof Error ? e.message : 'Unknown error' });
+        return;
+      }
+    }
     if (!requireOnline()) return;
     setBusy(true);
     try {
       await callFn('delete', { cashier_id: c.id });
+      try {
+        const key = `farmfront_cashiers_${businessId}`;
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : [];
+        const updated = arr.filter((x: any) => x.id !== c.id);
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch {}
       toast({ title: 'Cashier removed' });
       await fetchCashiers();
     } catch (e) {
@@ -437,6 +620,20 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                       />
                       <Label htmlFor={`backdate-${c.id}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
                         <CalendarClock className="h-3.5 w-3.5 inline mr-1" />Back-date
+                      </Label>
+                    </div>
+                  )}
+                  {mySalesAvailable && (
+                    <div className="flex items-center gap-2 mr-2">
+                      <Switch
+                        id={`my-sales-${c.id}`}
+                        checked={c.can_view_my_sales}
+                        disabled={busy}
+                        onCheckedChange={() => handleToggleMySales(c)}
+                        aria-label={`Show the My Sales tab for ${c.username}`}
+                      />
+                      <Label htmlFor={`my-sales-${c.id}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                        <Receipt className="h-3.5 w-3.5 inline mr-1" />My Sales
                       </Label>
                     </div>
                   )}
@@ -541,6 +738,21 @@ const CashiersManager = ({ businessId, paymentCode, planTier, isRestaurant = fal
                   id="c-backdate"
                   checked={newBackdate}
                   onCheckedChange={setNewBackdate}
+                />
+              </div>
+            )}
+            {mySalesAvailable && (
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                <Label htmlFor="c-my-sales" className="flex-1 text-sm">
+                  <span className="font-medium">Show the My Sales tab</span>
+                  <span className="block text-xs text-muted-foreground">
+                    They can review and reprint only their own sales. Turn off if you don't want staff seeing their sales.
+                  </span>
+                </Label>
+                <Switch
+                  id="c-my-sales"
+                  checked={newMySales}
+                  onCheckedChange={setNewMySales}
                 />
               </div>
             )}

@@ -371,6 +371,17 @@ const Auth = () => {
         }
       }
 
+      if (!isOnline) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+        toast({ variant: 'destructive', title: 'Offline login failed', description: offlineErr.message });
+        return;
+      }
+
       const invokeResult = await withTimeout(
         supabase.functions.invoke('manage-cashier', {
           body: {
@@ -382,28 +393,64 @@ const Auth = () => {
         }),
         ONLINE_ATTEMPT_TIMEOUT_MS,
       ).catch(() => null);
-      if (!invokeResult) throw new Error('network timeout');
+      if (!invokeResult) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+        throw new Error('network timeout');
+      }
       const { data, error: fnErr } = invokeResult;
-      if (fnErr) throw new Error(fnErr.message || 'Login failed');
+      if (fnErr) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+        throw new Error(fnErr.message || 'Login failed');
+      }
       const { email, password } = (data ?? {}) as { email?: string; password?: string };
-      if (!email || !password) throw new Error('Invalid response from server');
+      if (!email || !password) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+        throw new Error('Invalid response from server');
+      }
 
       const { error: signInErr } = await signIn(email, password);
-      if (signInErr) throw signInErr;
+      if (signInErr) {
+        const { error: offlineErr } = await signInOfflineCashier(cashierCode, cashierUsername, cashierPin);
+        if (!offlineErr) {
+          toast({ title: 'Offline Mode', description: 'Signed in as cashier with cached credentials.' });
+          setCashierLoginPending(true);
+          return;
+        }
+        throw signInErr;
+      }
 
       // Cache an offline lookup for this cashier (keyed by code+username) so
       // they can sign in with no internet next time. Best-effort only.
       try {
-        const { cacheCashierLookup } = await import('@/lib/offlineStorage');
+        const { cacheCashierLookup, cacheOfflineCredentials, hashPassword } = await import('@/lib/offlineStorage');
         await cacheCashierLookup({
           lookupKey: `${cashierCode.trim().toUpperCase()}:${cashierUsername.trim().toLowerCase()}`,
           email,
           username: cashierUsername.trim().toLowerCase(),
           businessCode: cashierCode.trim().toUpperCase(),
         });
+        try { await cacheOfflineCredentials({ email, passwordHash: await hashPassword(password), userId: (await supabase.auth.getUser()).data.user?.id || email, role: 'cashier', lastOnlineLogin: new Date().toISOString() }); } catch {}
       } catch {
         // non-fatal
       }
+      try {
+        localStorage.setItem(`farmfront_cashier_lookup_${cashierCode.trim().toUpperCase()}_${cashierUsername.trim().toLowerCase()}`, JSON.stringify({ email, username: cashierUsername.trim().toLowerCase(), businessCode: cashierCode.trim().toUpperCase() }));
+      } catch {}
 
       toast({ title: 'Signed in', description: 'Welcome.' });
       setCashierLoginPending(true);
@@ -959,13 +1006,23 @@ const Auth = () => {
                 </form>
 
                 {isElectron() && (
-                  <div className="mt-4 text-center">
-                    <Link
-                      to="/activate"
-                      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                    >
-                      Activate this PC for offline use
-                    </Link>
+                  <div className="mt-4 text-center space-y-1">
+                    <div>
+                      <Link
+                        to="/activate"
+                        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                      >
+                        Activate Owner (Offline)
+                      </Link>
+                    </div>
+                    <div>
+                      <Link
+                        to="/activate?type=cashier"
+                        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                      >
+                        Activate Cashier (Offline)
+                      </Link>
+                    </div>
                   </div>
                 )}
 

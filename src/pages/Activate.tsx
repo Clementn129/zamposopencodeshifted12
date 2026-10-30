@@ -32,13 +32,17 @@ const formatDate = (value?: string | null): string => {
 const Activate = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { signInOffline } = useAuthContext();
+  const { signInOffline, signInOfflineCashier } = useAuthContext();
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get('type') === 'cashier' ? 'cashier' : 'owner';
 
   const [file, setFile] = useState<File | null>(null);
   const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
   const [pin, setPin] = useState("");
   const [payload, setPayload] = useState<ActivationPayload | null>(null);
   const [password, setPassword] = useState("");
+  const [cashierUsername, setCashierUsername] = useState("");
+  const [cashierPin, setCashierPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secretSaved, setSecretSaved] = useState(false);
@@ -188,6 +192,39 @@ const Activate = () => {
     }
   };
 
+  const handleActivateCashier = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const code = payload?.business?.code || localStorage.getItem('zampos_payment_code') || 'POS-ED345B';
+      const uname = cashierUsername.trim().toLowerCase();
+      const cpin = cashierPin.trim();
+      if (!uname || !/^[a-z0-9_]{2,20}$/.test(uname)) throw new Error('Enter valid cashier username');
+      if (!/^\d{4,6}$/.test(cpin)) throw new Error('PIN must be 4-6 digits');
+      const id = 'offline-cashier-' + uname + '-' + Date.now();
+      const { cacheOfflineCredentials, hashPassword, cacheCashierLookup } = await import('@/lib/offlineStorage');
+      const passwordHash = await hashPassword('zampos-' + cpin);
+      await cacheOfflineCredentials({ email: `c-offline-${uname}@zampos.local`, passwordHash, userId: id, role: 'cashier', lastOnlineLogin: new Date().toISOString() });
+      await cacheCashierLookup({ lookupKey: `${code}:${uname}`, email: `c-offline-${uname}@zampos.local`, username: uname, businessCode: code });
+      localStorage.setItem(`farmfront_cashier_lookup_${code}_${uname}`, JSON.stringify({ email: `c-offline-${uname}@zampos.local`, username: uname, businessCode: code }));
+      localStorage.setItem(`zampos_cashier_${code}_${uname}`, JSON.stringify({ email: `c-offline-${uname}@zampos.local`, username: uname, businessCode: code }));
+      const key = `farmfront_cashiers_${payload?.business?.id || code}`;
+      const arr = JSON.parse(localStorage.getItem(key) || '[]');
+      arr.push({ id, businessId: payload?.business?.id || code, username: uname, display_name: uname, is_active: true, role: 'cashier', created_at: new Date().toISOString(), can_adjust_stock: false, can_backdate: false });
+      localStorage.setItem(key, JSON.stringify(arr));
+      localStorage.setItem('zampos_activation_complete', '1');
+      toast({ title: 'Cashier activated offline', description: `${uname} can login offline with Business Code ${code} and PIN ${cpin}.` });
+      const { error: sErr } = await signInOfflineCashier(code, uname, cpin);
+      if (sErr) { navigate('/auth?tab=cashier', { replace: true }); return; }
+      navigate('/pos', { replace: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to activate cashier.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-lg">
@@ -251,6 +288,45 @@ const Activate = () => {
               <Button type="submit" variant="pos" className="w-full" disabled={!desktop || busy}>
                 {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Open activation file
+              </Button>
+            </form>
+          ) : type === 'cashier' ? (
+            <form onSubmit={handleActivateCashier} className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  Activate cashier for offline login
+                </div>
+                <dl className="mt-3 grid gap-2 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Business</dt>
+                    <dd className="text-right font-medium">{payload.business.name}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Business code</dt>
+                    <dd className="text-right font-mono">{payload.business.code || "—"}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cashier-username">Cashier Username</Label>
+                <Input id="cashier-username" value={cashierUsername} onChange={(e) => setCashierUsername(e.target.value)} placeholder="cashier" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cashier-pin">Cashier PIN (4-6 digits)</Label>
+                <Input id="cashier-pin" type="password" inputMode="numeric" value={cashierPin} onChange={(e) => setCashierPin(e.target.value)} placeholder="2222" required />
+              </div>
+              {error && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+              <Button type="submit" variant="pos" className="w-full" disabled={busy}>
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Activate Cashier Offline
+              </Button>
+              <Button type="button" variant="ghost" className="w-full" onClick={() => { setPayload(null); setError(null); }}>
+                Back
               </Button>
             </form>
           ) : (

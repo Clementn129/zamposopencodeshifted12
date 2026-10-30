@@ -1,7 +1,7 @@
 // Offline storage utilities using IndexedDB and localStorage
 
 const DB_NAME = 'zampos_db';
-const DB_VERSION = 13; // Increment when schema changes; must always be > any previously deployed version
+const DB_VERSION = 15; // Increment when schema changes; must always be > any previously deployed version
 
 // Detect browser's existing DB version to handle downgrade
 const getExistingVersion = (): Promise<number> => {
@@ -294,6 +294,7 @@ const openExistingAndMigrate = async (): Promise<IDBDatabase> => {
       }
       if (!db.objectStoreNames.contains('cashierLookup')) {
         db.createObjectStore('cashierLookup', { keyPath: 'lookupKey' });
+        db.createObjectStore('businessCashiers', { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains('invoicesCache')) {
         const invoicesCacheStore = db.createObjectStore('invoicesCache', { keyPath: 'id' });
@@ -384,6 +385,7 @@ const tryCreate = (version: number): Promise<IDBDatabase> => {
       }
       if (!db.objectStoreNames.contains('cashierLookup')) {
         db.createObjectStore('cashierLookup', { keyPath: 'lookupKey' });
+        db.createObjectStore('businessCashiers', { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains('invoicesCache')) {
         const invoicesCacheStore = db.createObjectStore('invoicesCache', { keyPath: 'id' });
@@ -1885,3 +1887,87 @@ export const resetFailedOps = async (opIds: string[]): Promise<void> => {
 
 // Initialize DB on module load to ensure stores exist
 initDB().catch(console.error);
+
+// Local cashiers (for offline-first cashier creation)
+export interface LocalCashier {
+  id: string;
+  businessId: string;
+  username: string;
+  display_name: string | null;
+  is_active: boolean;
+  role: string;
+  created_at: string;
+  can_adjust_stock: boolean;
+  can_backdate: boolean;
+  can_view_my_sales?: boolean;
+}
+
+export const cacheLocalCashier = async (cashier: LocalCashier): Promise<void> => {
+  try {
+    const db = await getDB();
+    if (!db.objectStoreNames.contains('businessCashiers')) {
+      db.close();
+      dbInstance = null;
+      await new Promise(r => setTimeout(r, 50));
+      const db2 = await initDB();
+      if (!db2.objectStoreNames.contains('businessCashiers')) {
+        throw new Error('businessCashiers store not found');
+      }
+      return new Promise((resolve, reject) => {
+        const transaction = db2.transaction(['businessCashiers'], 'readwrite');
+        const store = transaction.objectStore('businessCashiers');
+        const request = store.put(cashier);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['businessCashiers'], 'readwrite');
+      const store = transaction.objectStore('businessCashiers');
+      const request = store.put(cashier);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    throw e;
+  }
+};
+
+export const getLocalCashiers = async (businessId: string): Promise<LocalCashier[]> => {
+  try {
+    const db = await getDB();
+    if (!db.objectStoreNames.contains('businessCashiers')) {
+      return [];
+    }
+    return new Promise((resolve) => {
+      const transaction = db.transaction(['businessCashiers'], 'readonly');
+      const store = transaction.objectStore('businessCashiers');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const all = (request.result || []) as LocalCashier[];
+        resolve(all.filter(c => c.businessId === businessId));
+      };
+      request.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const removeLocalCashier = async (id: string): Promise<void> => {
+  try {
+    const db = await getDB();
+    if (!db.objectStoreNames.contains('businessCashiers')) {
+      return;
+    }
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['businessCashiers'], 'readwrite');
+      const store = transaction.objectStore('businessCashiers');
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return;
+  }
+};
