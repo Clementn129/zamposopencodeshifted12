@@ -106,6 +106,16 @@ export function useRealtimeSync(businessId: string | undefined) {
           window.dispatchEvent(new CustomEvent("zampos:debtors-changed", { detail: payload }));
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "business_cashiers", filter: `business_id=eq.${businessId}` },
+        (payload: any) => {
+          // Per-cashier grants (can_view_my_sales, can_adjust_stock, can_backdate)
+          // and is_active changes. Dispatched so the permission hooks and the
+          // active guard react immediately instead of waiting for focus/reload.
+          window.dispatchEvent(new CustomEvent("zampos:cashier-changed", { detail: payload }));
+        }
+      )
       .subscribe();
 
     return () => {

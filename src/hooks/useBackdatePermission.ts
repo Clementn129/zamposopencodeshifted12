@@ -62,5 +62,19 @@ export const useBackdatePermission = () => {
     return () => { cancelled = true; };
   }, [masterOn, business?.id, role, user]);
 
+  // React to live cashier-row changes (owner toggling back-dating) without
+  // waiting for a page reload.
+  useEffect(() => {
+    if (role !== 'cashier' || !business?.id || !user || !masterOn) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { new?: Record<string, any> } | undefined;
+      const row = detail?.new;
+      if (!row || row.auth_user_id !== user.id) return;
+      setCanBackdate(row.can_backdate === true);
+    };
+    window.addEventListener('zampos:cashier-changed', handler);
+    return () => window.removeEventListener('zampos:cashier-changed', handler);
+  }, [masterOn, business?.id, role, user]);
+
   return { canBackdate };
 };

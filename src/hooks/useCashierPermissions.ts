@@ -146,5 +146,24 @@ export const useCashierPermissions = () => {
     };
   }, [business?.id, role, user]);
 
+  // React to live cashier-row changes (owner toggling grants on another device)
+  // without waiting for focus/reload.
+  useEffect(() => {
+    if (role !== 'cashier' || !business?.id || !user) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { new?: Record<string, any> } | undefined;
+      const row = detail?.new;
+      if (!row || row.auth_user_id !== user.id) return;
+      // My Sales visibility
+      const visible = row.can_view_my_sales !== false;
+      writeCachedMySales(business.id, user.id, visible);
+      setCanViewMySales(visible);
+      // Stock access
+      setCanAdjustStock(row.can_adjust_stock === true);
+    };
+    window.addEventListener('zampos:cashier-changed', handler);
+    return () => window.removeEventListener('zampos:cashier-changed', handler);
+  }, [business?.id, role, user]);
+
   return { isCashier, canAdjustStock, canViewMySales };
 };

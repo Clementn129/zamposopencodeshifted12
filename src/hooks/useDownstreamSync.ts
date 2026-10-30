@@ -21,6 +21,12 @@ export function useDownstreamSync(businessId: string | undefined) {
 
   const expLastSyncAt = useCallback(() => {
     if (!businessId) return;
+    // Throttle: last_sync_at is only read by the admin dashboard, so stamping it
+    // on every 5-min pull just churns the realtime channel. 15 min is plenty.
+    const key = `zampos.lastSyncAtWrite.${businessId}`;
+    const last = Number(window.localStorage.getItem(key) ?? 0);
+    if (Date.now() - last < 15 * 60 * 1000) return;
+    window.localStorage.setItem(key, String(Date.now()));
     const now = new Date().toISOString();
     supabase.from("businesses").update({ last_sync_at: now }).eq("id", businessId).then(() => {}, () => {});
   }, [businessId]);
